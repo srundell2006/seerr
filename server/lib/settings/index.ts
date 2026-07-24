@@ -103,6 +103,30 @@ export interface SonarrSettings extends DVRSettings {
   monitorNewItems: 'all' | 'none';
 }
 
+/**
+ * BookLore plays two roles at once for books: the availability source
+ * (Jellyfin's job) and the acquisition backend (Radarr's job), behind a single
+ * base URL. It authenticates with short-lived JWTs rather than an API key, so
+ * this carries credentials instead of an apiKey.
+ *
+ * Point `hostname` at the container address directly. Routing through a public
+ * hostname puts forward-auth in front of the API and breaks the JWT flow.
+ */
+export interface BookLoreSettings {
+  enabled: boolean;
+  hostname: string;
+  port: number;
+  useSsl: boolean;
+  baseUrl?: string;
+  /** Must be a BookLore admin: every wanted-books endpoint requires admin. */
+  username: string;
+  password: string;
+  externalUrl?: string;
+  defaultFormat: 'EBOOK' | 'AUDIOBOOK' | 'ANY';
+  /** Ask BookLore to run its indexer search across the wanted list on sync. */
+  autoSearch: boolean;
+}
+
 interface Quota {
   quotaLimit?: number;
   quotaDays?: number;
@@ -367,7 +391,8 @@ export type JobId =
   | 'jellyfin-full-scan'
   | 'image-cache-cleanup'
   | 'availability-sync'
-  | 'process-blocklisted-tags';
+  | 'process-blocklisted-tags'
+  | 'booklore-sync';
 
 export interface AllSettings {
   clientId: string;
@@ -380,6 +405,7 @@ export interface AllSettings {
   tautulli: TautulliSettings;
   radarr: RadarrSettings[];
   sonarr: SonarrSettings[];
+  booklore: BookLoreSettings;
   public: PublicSettings;
   notifications: NotificationSettings;
   jobs: Record<JobId, JobSettings>;
@@ -456,6 +482,18 @@ class Settings {
       },
       radarr: [],
       sonarr: [],
+      booklore: {
+        enabled: false,
+        hostname: '',
+        port: 6060,
+        useSsl: false,
+        baseUrl: '',
+        username: '',
+        password: '',
+        externalUrl: '',
+        defaultFormat: 'EBOOK',
+        autoSearch: false,
+      },
       public: {
         initialized: false,
       },
@@ -606,6 +644,9 @@ class Settings {
         'process-blocklisted-tags': {
           schedule: '0 30 1 */7 * *',
         },
+        'booklore-sync': {
+          schedule: '0 */2 * * * *',
+        },
       },
       network: {
         csrfProtection: false,
@@ -736,6 +777,14 @@ class Settings {
       youtubeUrl: this.data.main.youtubeUrl,
       plexClientIdentifier: this.data.clientId,
     };
+  }
+
+  get booklore(): BookLoreSettings {
+    return this.data.booklore;
+  }
+
+  set booklore(data: BookLoreSettings) {
+    this.data.booklore = mergeSettings(this.data.booklore, data);
   }
 
   get notifications(): NotificationSettings {

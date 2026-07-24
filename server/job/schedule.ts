@@ -1,6 +1,7 @@
 import { MediaServerType } from '@server/constants/server';
 import blocklistedTagsProcessor from '@server/job/blocklistedTagsProcessor';
 import availabilitySync from '@server/lib/availabilitySync';
+import bookLoreTracker from '@server/lib/bookloretracker';
 import downloadTracker from '@server/lib/downloadtracker';
 import ImageProxy from '@server/lib/imageproxy';
 import refreshToken from '@server/lib/refreshToken';
@@ -257,6 +258,23 @@ export const startJobs = (): void => {
     }),
     running: () => blocklistedTagsProcessor.status().running,
     cancelFn: () => blocklistedTagsProcessor.cancel(),
+  });
+
+  // Poll BookLore's wanted list. BookLore has no import callback, so book
+  // request status can only be tracked by polling.
+  scheduledJobs.push({
+    id: 'booklore-sync',
+    name: 'BookLore Sync',
+    type: 'command',
+    interval: 'minutes',
+    cronSchedule: jobs['booklore-sync'].schedule,
+    job: schedule.scheduleJob(jobs['booklore-sync'].schedule, () => {
+      logger.debug('Starting scheduled job: BookLore Sync', {
+        label: 'Jobs',
+      });
+      bookLoreTracker.run();
+    }),
+    running: () => bookLoreTracker.status().running,
   });
 
   logger.info('Scheduled jobs loaded', { label: 'Jobs' });
