@@ -549,6 +549,67 @@ components:
         externalUrl:
           type: string
           nullable: true
+    BookSearchResults:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              title:
+                type: string
+              authors:
+                type: array
+                items:
+                  type: string
+              isbn13:
+                type: string
+                nullable: true
+              asin:
+                type: string
+                nullable: true
+              thumbnailUrl:
+                type: string
+                nullable: true
+              provider:
+                type: string
+              inLibrary:
+                type: boolean
+              alreadyWanted:
+                type: boolean
+    BookLoreSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          example: false
+        hostname:
+          type: string
+          example: '127.0.0.1'
+        port:
+          type: number
+          example: 6060
+        useSsl:
+          type: boolean
+          example: false
+        baseUrl:
+          type: string
+        username:
+          type: string
+          example: 'seerr'
+        password:
+          type: string
+          example: 'password'
+        externalUrl:
+          type: string
+        defaultFormat:
+          type: string
+          enum: [EBOOK, AUDIOBOOK, ANY]
+          example: EBOOK
+        autoSearch:
+          type: boolean
+          example: false
     RadarrSettings:
       type: object
       properties:
@@ -2695,6 +2756,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TautulliSettings'
+  /settings/booklore:
+    get:
+      summary: Get BookLore settings
+      description: Returns the BookLore settings in a JSON object.
+      tags:
+        - settings
+      responses:
+        '200':
+          description: 'Values were returned'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookLoreSettings'
+    post:
+      summary: Update BookLore settings
+      description: Updates the BookLore settings with the provided values.
+      tags:
+        - settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookLoreSettings'
+      responses:
+        '200':
+          description: 'Values were successfully updated'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookLoreSettings'
+  /settings/booklore/test:
+    post:
+      summary: Test BookLore configuration
+      description: |
+        Tests if the BookLore configuration is valid. Logs in and then reads the
+        wanted list, so a non-admin account is reported as a failure rather than
+        a false success.
+      tags:
+        - settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookLoreSettings'
+      responses:
+        '200':
+          description: Successfully connected to BookLore
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected:
+                    type: boolean
+                  wantedCount:
+                    type: number
+                  isAdmin:
+                    type: boolean
   /settings/radarr:
     get:
       summary: Get Radarr settings
@@ -5402,6 +5523,25 @@ paths:
                       $ref: '#/components/schemas/MediaInfo'
                   playCount:
                     type: number
+  /search/books:
+    get:
+      summary: Search for books via BookLore
+      description: Alias of `/book/search`, exposed under the search namespace.
+      tags:
+        - search
+      parameters:
+        - in: query
+          name: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Results returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookSearchResults'
   /search:
     get:
       summary: Search for movies, TV shows, or people
@@ -6395,6 +6535,46 @@ paths:
                           type: string
                         title:
                           type: string
+  /book/search:
+    get:
+      summary: Search for books via BookLore
+      description: |
+        Searches BookLore's configured metadata providers. Each result is
+        annotated with whether it is already in the library or already on the
+        wanted list.
+      tags:
+        - search
+      parameters:
+        - in: query
+          name: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Results returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookSearchResults'
+  /book/wanted:
+    get:
+      summary: Get the BookLore wanted list
+      description: Returns the tracker's current snapshot of BookLore's wanted list.
+      tags:
+        - search
+      responses:
+        '200':
+          description: Results returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
   /request:
     get:
       summary: Get all requests
@@ -6457,7 +6637,7 @@ paths:
           name: mediaType
           schema:
             type: string
-            enum: [movie, tv, all]
+            enum: [movie, tv, book, all]
             nullable: true
             default: all
       responses:
@@ -6491,11 +6671,27 @@ paths:
               properties:
                 mediaType:
                   type: string
-                  enum: [movie, tv]
+                  enum: [movie, tv, book]
                   example: movie
                 mediaId:
                   type: number
                   example: 123
+                title:
+                  type: string
+                  description: Book requests only. The book title.
+                author:
+                  type: string
+                  description: Book requests only.
+                isbn13:
+                  type: string
+                  description: Book requests only.
+                asin:
+                  type: string
+                  description: Book requests only. Identifies an audiobook edition.
+                preferredFormat:
+                  type: string
+                  enum: [EBOOK, AUDIOBOOK, ANY]
+                  description: Book requests only.
                 tvdbId:
                   type: number
                   example: 123
@@ -6527,7 +6723,6 @@ paths:
                   description: If true, this request will not count against the user's quota. Requires MANAGE_REQUESTS permission.
               required:
                 - mediaType
-                - mediaId
       responses:
         '201':
           description: Succesfully created the request
