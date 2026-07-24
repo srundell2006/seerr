@@ -2,6 +2,7 @@ import Slider from '@app/components/Slider';
 import TmdbTitleCard from '@app/components/TitleCard/TmdbTitleCard';
 import { Permission, useUser } from '@app/hooks/useUser';
 import defineMessages from '@app/utils/defineMessages';
+import { isTmdbMedia } from '@app/utils/mediaType';
 import type { MediaResultsResponse } from '@server/interfaces/api/mediaInterfaces';
 import { useIntl } from 'react-intl';
 import useSWR from 'swr';
@@ -18,8 +19,12 @@ const RecentlyAddedSlider = () => {
     { revalidateOnMount: true }
   );
 
+  // Books have no TMDB title card and live on /books, so they never belong in
+  // this slider — drop them before any count or empty state is derived.
+  const tmdbMedia = media?.results.filter(isTmdbMedia);
+
   if (
-    (media && !media.results.length && !mediaError) ||
+    (tmdbMedia && !tmdbMedia.length && !mediaError) ||
     !hasPermission([Permission.MANAGE_REQUESTS, Permission.RECENT_VIEW], {
       type: 'or',
     })
@@ -37,7 +42,7 @@ const RecentlyAddedSlider = () => {
       <Slider
         sliderKey="media"
         isLoading={!media}
-        items={(media?.results ?? []).map((item) => (
+        items={(tmdbMedia ?? []).map((item) => (
           <TmdbTitleCard
             key={`media-slider-item-${item.id}`}
             id={item.id}

@@ -648,6 +648,20 @@ export class MediaRequest {
   @Column({ default: false })
   public ignoreQuota: boolean;
 
+  /**
+   * Book request detail. Books have no TMDB record to look the title back up
+   * from, so the requested title/author are stored on the request itself.
+   * Null for movie and TV requests.
+   */
+  @Column({ nullable: true })
+  public bookTitle?: string;
+
+  @Column({ nullable: true })
+  public bookAuthor?: string;
+
+  @Column({ nullable: true })
+  public bookFormat?: string;
+
   constructor(init?: Partial<MediaRequest>) {
     Object.assign(this, init);
   }
@@ -805,7 +819,20 @@ export class MediaRequest {
           break;
       }
 
-      if (entity.type === MediaType.MOVIE) {
+      if (entity.type === MediaType.BOOK) {
+        // Books have no TMDB record to enrich from, so the request itself is
+        // the only source of a title and author.
+        notificationManager.sendNotification(type, {
+          media,
+          request: entity,
+          notifyAdmin,
+          notifySystem,
+          notifyUser: notifyAdmin ? undefined : entity.requestedBy,
+          event,
+          subject: entity.bookTitle ?? 'Book request',
+          message: entity.bookAuthor ?? '',
+        });
+      } else if (entity.type === MediaType.MOVIE && media.tmdbId) {
         const movie = await tmdb.getMovie({ movieId: media.tmdbId });
         notificationManager.sendNotification(type, {
           media,
@@ -824,7 +851,7 @@ export class MediaRequest {
           }),
           image: `https://image.tmdb.org/t/p/w600_and_h900_bestv2${movie.poster_path}`,
         });
-      } else if (entity.type === MediaType.TV) {
+      } else if (entity.type === MediaType.TV && media.tmdbId) {
         const tv = await tmdb.getTvShow({ tvId: media.tmdbId });
         notificationManager.sendNotification(type, {
           media,

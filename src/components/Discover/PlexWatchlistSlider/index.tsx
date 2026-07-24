@@ -2,6 +2,7 @@ import Slider from '@app/components/Slider';
 import TmdbTitleCard from '@app/components/TitleCard/TmdbTitleCard';
 import { useUser } from '@app/hooks/useUser';
 import defineMessages from '@app/utils/defineMessages';
+import { isTmdbWatchlistItem } from '@app/utils/mediaType';
 import { ArrowRightCircleIcon } from '@heroicons/react/24/outline';
 import type { WatchlistItem } from '@server/interfaces/api/discoverInterfaces';
 import Link from 'next/link';
@@ -27,9 +28,14 @@ const PlexWatchlistSlider = () => {
     revalidateOnMount: true,
   });
 
+  // Books have no TMDB title card and live on /books, so they never belong in
+  // this slider — drop them before any count or empty state is derived.
+  const tmdbWatchlistItems =
+    watchlistItems?.results.filter(isTmdbWatchlistItem);
+
   if (
-    (watchlistItems &&
-      watchlistItems.results.length === 0 &&
+    (tmdbWatchlistItems &&
+      tmdbWatchlistItems.length === 0 &&
       !user?.settings?.watchlistSyncMovies &&
       !user?.settings?.watchlistSyncTv) ||
     watchlistError
@@ -48,7 +54,7 @@ const PlexWatchlistSlider = () => {
       <Slider
         sliderKey="watchlist"
         isLoading={!watchlistItems}
-        isEmpty={!!watchlistItems && watchlistItems.results.length === 0}
+        isEmpty={!!tmdbWatchlistItems && tmdbWatchlistItems.length === 0}
         emptyMessage={intl.formatMessage(messages.emptywatchlist, {
           PlexWatchlistSupportLink: (msg: React.ReactNode) => (
             <a
@@ -61,7 +67,7 @@ const PlexWatchlistSlider = () => {
             </a>
           ),
         })}
-        items={watchlistItems?.results.map((item) => (
+        items={tmdbWatchlistItems?.map((item) => (
           <TmdbTitleCard
             id={item.tmdbId}
             key={`watchlist-slider-item-${item.ratingKey}`}

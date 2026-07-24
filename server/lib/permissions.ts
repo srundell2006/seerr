@@ -28,6 +28,10 @@ export enum Permission {
   RECENT_VIEW = 67108864,
   WATCHLIST_VIEW = 134217728,
   MANAGE_BLOCKLIST = 268435456,
+  // Bit 29 — the only free bit below the signed-32-bit ceiling. Bit 31
+  // (2147483648) would overflow the integer `permissions` column and JS
+  // bitwise ops, so it must stay unused.
+  REQUEST_BOOK = 536870912,
   VIEW_BLOCKLIST = 1073741824,
 }
 

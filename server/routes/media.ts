@@ -270,6 +270,10 @@ mediaRoutes.delete(
         });
       }
 
+      if (!media.tmdbId) {
+        throw new Error('Media has no TMDB ID');
+      }
+
       if (isMovie) {
         await (service as RadarrAPI).removeMovie(media.tmdbId);
       } else {

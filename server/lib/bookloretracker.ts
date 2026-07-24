@@ -4,6 +4,14 @@ import {
   getBookLoreClient,
   matchWantedBook,
 } from '@server/api/booklore';
+import {
+  MediaRequestStatus,
+  MediaStatus,
+  MediaType,
+} from '@server/constants/media';
+import { getRepository } from '@server/datasource';
+import Media from '@server/entity/Media';
+import { MediaRequest } from '@server/entity/MediaRequest';
 import logger from '@server/logger';
 
 export interface BookLoreTransition {
@@ -214,6 +222,70 @@ class BookLoreTracker {
   }
 }
 
+/**
+ * Propagates a BookLore status change onto Seerr's own Media and MediaRequest
+ * rows. This is the seam the first pass deliberately left open — it works now
+ * that Media carries bookloreWantedBookId and a nullable tmdbId.
+ *
+ * BookLore's WantedBookStatus maps onto MediaStatus as:
+ *   WANTED / GRABBED -> PROCESSING
+ *   IMPORTED         -> AVAILABLE
+ *   FAILED           -> no MediaStatus equivalent; the request is marked
+ *                       FAILED and the media is left PROCESSING so a retry
+ *                       does not look like a fresh request.
+ */
+const applyTransitionToMedia = async ({
+  book,
+  currentStatus,
+}: BookLoreTransition): Promise<void> => {
+  const mediaRepository = getRepository(Media);
+  const requestRepository = getRepository(MediaRequest);
+
+  const media = await mediaRepository.findOne({
+    where: { bookloreWantedBookId: book.id, mediaType: MediaType.BOOK },
+  });
+
+  if (!media) {
+    logger.debug('No Seerr media row for BookLore wanted book, ignoring', {
+      label: 'BookLore Tracker',
+      wantedBookId: book.id,
+    });
+    return;
+  }
+
+  const request = await requestRepository.findOne({
+    where: { media: { id: media.id } },
+    order: { createdAt: 'DESC' },
+  });
+
+  switch (currentStatus) {
+    case WantedBookStatus.IMPORTED:
+      media.status = MediaStatus.AVAILABLE;
+      media.bookloreBookId = book.importedBookId ?? undefined;
+      if (request) {
+        request.status = MediaRequestStatus.COMPLETED;
+      }
+      break;
+    case WantedBookStatus.FAILED:
+      if (request) {
+        request.status = MediaRequestStatus.FAILED;
+      }
+      break;
+    case WantedBookStatus.WANTED:
+    case WantedBookStatus.GRABBED:
+      media.status = MediaStatus.PROCESSING;
+      break;
+  }
+
+  await mediaRepository.save(media);
+
+  if (request) {
+    await requestRepository.save(request);
+  }
+};
+
 const bookLoreTracker = new BookLoreTracker();
+
+bookLoreTracker.onTransition(applyTransitionToMedia);
 
 export default bookLoreTracker;

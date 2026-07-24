@@ -39,6 +39,7 @@ import { rescheduleJob } from 'node-schedule';
 import path from 'path';
 import semver from 'semver';
 import { URL } from 'url';
+import bookloreRoutes from './booklore';
 import metadataRoutes from './metadata';
 import notificationRoutes from './notifications';
 import radarrRoutes from './radarr';
@@ -47,6 +48,7 @@ import sonarrRoutes from './sonarr';
 const settingsRoutes = Router();
 
 settingsRoutes.use('/notifications', notificationRoutes);
+settingsRoutes.use('/booklore', bookloreRoutes);
 settingsRoutes.use('/radarr', radarrRoutes);
 settingsRoutes.use('/sonarr', sonarrRoutes);
 settingsRoutes.use('/discover', discoverSettingRoutes);

@@ -7,7 +7,9 @@ import useRequestOverride from '@app/hooks/useRequestOverride';
 import { useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
+import { isTmdbMediaType } from '@app/utils/mediaType';
 import {
+  BookOpenIcon,
   CalendarIcon,
   CheckIcon,
   EyeIcon,
@@ -38,6 +40,9 @@ const messages = defineMessages('components.RequestBlock', {
   decline: 'Decline Request',
   edit: 'Edit Request',
   delete: 'Delete Request',
+  book: 'Book',
+  bookbyauthor: '{title} by {author}',
+  unknowntitle: 'Unknown Title',
 });
 
 interface RequestBlockProps {
@@ -52,6 +57,13 @@ const RequestBlock = ({ request, onUpdate }: RequestBlockProps) => {
   const [showEditModal, setShowEditModal] = useState(false);
   const { profile, rootFolder, server, languageProfile } =
     useRequestOverride(request);
+
+  // Book requests have no TMDB record to look a title up from, so they cannot
+  // be edited through the TMDB-backed request modal.
+  const tmdbRequest =
+    isTmdbMediaType(request.type) && request.media.tmdbId !== undefined
+      ? { tmdbId: request.media.tmdbId, type: request.type }
+      : undefined;
 
   const updateRequest = async (type: 'approve' | 'decline'): Promise<void> => {
     setIsUpdating(true);
@@ -78,23 +90,45 @@ const RequestBlock = ({ request, onUpdate }: RequestBlockProps) => {
 
   return (
     <div className="block">
-      <RequestModal
-        show={showEditModal}
-        tmdbId={request.media.tmdbId}
-        type={request.type}
-        is4k={request.is4k}
-        editRequest={request}
-        onCancel={() => setShowEditModal(false)}
-        onComplete={() => {
-          if (onUpdate) {
-            onUpdate();
-          }
-          setShowEditModal(false);
-        }}
-      />
+      {tmdbRequest && (
+        <RequestModal
+          show={showEditModal}
+          tmdbId={tmdbRequest.tmdbId}
+          type={tmdbRequest.type}
+          is4k={request.is4k}
+          editRequest={request}
+          onCancel={() => setShowEditModal(false)}
+          onComplete={() => {
+            if (onUpdate) {
+              onUpdate();
+            }
+            setShowEditModal(false);
+          }}
+        />
+      )}
       <div className="px-4 py-3 text-gray-300">
         <div className="flex items-center justify-between">
           <div className="mr-6 min-w-0 flex-1 flex-col items-center text-sm leading-5">
+            {!isTmdbMediaType(request.type) && (
+              <div className="mb-1 flex flex-nowrap">
+                <span className="flex w-40 items-center truncate md:w-auto">
+                  <Tooltip content={intl.formatMessage(messages.book)}>
+                    <BookOpenIcon className="mr-1.5 h-5 w-5 min-w-0 flex-shrink-0" />
+                  </Tooltip>
+                  <span className="truncate font-semibold text-gray-100">
+                    {request.bookAuthor
+                      ? intl.formatMessage(messages.bookbyauthor, {
+                          title:
+                            request.bookTitle ??
+                            intl.formatMessage(messages.unknowntitle),
+                          author: request.bookAuthor,
+                        })
+                      : (request.bookTitle ??
+                        intl.formatMessage(messages.unknowntitle))}
+                  </span>
+                </span>
+              </div>
+            )}
             <div className="white mb-1 flex flex-nowrap">
               <span className="flex w-40 items-center truncate md:w-auto">
                 <Tooltip content={intl.formatMessage(messages.requestedby)}>
@@ -177,15 +211,17 @@ const RequestBlock = ({ request, onUpdate }: RequestBlockProps) => {
                     <XMarkIcon />
                   </Button>
                 </Tooltip>
-                <Tooltip content={intl.formatMessage(messages.edit)}>
-                  <Button
-                    buttonType="warning"
-                    onClick={() => setShowEditModal(true)}
-                    disabled={isUpdating}
-                  >
-                    <PencilIcon className="icon-sm" />
-                  </Button>
-                </Tooltip>
+                {tmdbRequest && (
+                  <Tooltip content={intl.formatMessage(messages.edit)}>
+                    <Button
+                      buttonType="warning"
+                      onClick={() => setShowEditModal(true)}
+                      disabled={isUpdating}
+                    >
+                      <PencilIcon className="icon-sm" />
+                    </Button>
+                  </Tooltip>
+                )}
               </>
             )}
             {request.status !== MediaRequestStatus.PENDING && (

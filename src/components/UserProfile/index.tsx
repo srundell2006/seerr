@@ -9,6 +9,7 @@ import ProfileHeader from '@app/components/UserProfile/ProfileHeader';
 import { Permission, UserType, useUser } from '@app/hooks/useUser';
 import ErrorPage from '@app/pages/_error';
 import defineMessages from '@app/utils/defineMessages';
+import { isTmdbMedia, isTmdbWatchlistItem } from '@app/utils/mediaType';
 import { ArrowRightCircleIcon } from '@heroicons/react/24/outline';
 import type { WatchlistResponse } from '@server/interfaces/api/discoverInterfaces';
 import type {
@@ -118,6 +119,12 @@ const UserProfile = () => {
   if (!user) {
     return <ErrorPage statusCode={404} />;
   }
+
+  // Books have no TMDB title card and live on /books, so they never belong in
+  // these sliders — drop them before any count or empty state is derived.
+  const tmdbWatchlistItems =
+    watchlistItems?.results.filter(isTmdbWatchlistItem);
+  const tmdbRecentlyWatched = watchData?.recentlyWatched?.filter(isTmdbMedia);
 
   const watchlistSliderTitle = intl.formatMessage(
     user.userType === UserType.PLEX
@@ -328,8 +335,8 @@ const UserProfile = () => {
           [Permission.MANAGE_REQUESTS, Permission.WATCHLIST_VIEW],
           { type: 'or' }
         )) &&
-        (!watchlistItems ||
-          !!watchlistItems.results.length ||
+        (!tmdbWatchlistItems ||
+          !!tmdbWatchlistItems.length ||
           (user.id === currentUser?.id &&
             (user.settings?.watchlistSyncMovies ||
               user.settings?.watchlistSyncTv))) &&
@@ -351,7 +358,7 @@ const UserProfile = () => {
             <Slider
               sliderKey="watchlist"
               isLoading={!watchlistItems}
-              isEmpty={!!watchlistItems && watchlistItems.results.length === 0}
+              isEmpty={!!tmdbWatchlistItems && tmdbWatchlistItems.length === 0}
               emptyMessage={intl.formatMessage(messages.emptywatchlist, {
                 PlexWatchlistSupportLink: (msg: React.ReactNode) => (
                   <a
@@ -364,7 +371,7 @@ const UserProfile = () => {
                   </a>
                 ),
               })}
-              items={watchlistItems?.results.map((item) => (
+              items={tmdbWatchlistItems?.map((item) => (
                 <TmdbTitleCard
                   id={item.tmdbId}
                   key={`watchlist-slider-item-${item.ratingKey}`}
@@ -378,7 +385,7 @@ const UserProfile = () => {
       {user.userType === UserType.PLEX &&
         (user.id === currentUser?.id ||
           currentHasPermission(Permission.ADMIN)) &&
-        (!watchData || !!watchData.recentlyWatched?.length) &&
+        (!watchData || !!tmdbRecentlyWatched?.length) &&
         !watchDataError && (
           <>
             <div className="slider-header">
@@ -389,7 +396,7 @@ const UserProfile = () => {
             <Slider
               sliderKey="media"
               isLoading={!watchData}
-              items={watchData?.recentlyWatched?.map((item) => (
+              items={tmdbRecentlyWatched?.map((item) => (
                 <TmdbTitleCard
                   key={`media-slider-item-${item.id}`}
                   id={item.id}

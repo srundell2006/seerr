@@ -4,6 +4,7 @@ import Media from '@server/entity/Media';
 import { findSearchProvider } from '@server/lib/search';
 import logger from '@server/logger';
 import { mapSearchResults } from '@server/models/Search';
+import { bookSearchHandler } from '@server/routes/book';
 import { Router } from 'express';
 
 const searchRoutes = Router();
@@ -105,5 +106,7 @@ searchRoutes.get('/company', async (req, res, next) => {
     });
   }
 });
+
+searchRoutes.get('/books', bookSearchHandler);
 
 export default searchRoutes;

@@ -1,3 +1,4 @@
+import { getBookLoreClient } from '@server/api/booklore';
 import type { RadarrMovieOptions } from '@server/api/servarr/radarr';
 import RadarrAPI from '@server/api/servarr/radarr';
 import type {
@@ -17,6 +18,7 @@ import Media from '@server/entity/Media';
 import { MediaRequest } from '@server/entity/MediaRequest';
 import Season from '@server/entity/Season';
 import SeasonRequest from '@server/entity/SeasonRequest';
+import { toWantedBookOptions } from '@server/lib/bookrequests';
 import notificationManager, { Notification } from '@server/lib/notifications';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -65,6 +67,10 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       !latestMedia ||
       latestMedia[entity.is4k ? 'status4k' : 'status'] !== MediaStatus.AVAILABLE
     ) {
+      return;
+    }
+
+    if (!entity.media.tmdbId) {
       return;
     }
 
@@ -141,6 +147,10 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       return;
     }
 
+    if (!entity.media.tmdbId) {
+      return;
+    }
+
     const tmdb = new TheMovieDb();
 
     try {
@@ -176,6 +186,90 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
         label: 'Notifications',
         errorMessage: e.message,
         mediaId: entity.id,
+      });
+    }
+  }
+
+  /**
+   * The BookLore counterpart to sendToRadarr/sendToSonarr.
+   *
+   * BookLore's POST /wanted-books saves unconditionally with no dedupe, so
+   * this goes through addWantedBookIfAbsent rather than posting blind — a
+   * retried or re-approved request would otherwise stack duplicate entries on
+   * the wanted list.
+   */
+  public async sendToBookLore(entity: MediaRequest): Promise<void> {
+    if (
+      entity.status !== MediaRequestStatus.APPROVED ||
+      entity.type !== MediaType.BOOK
+    ) {
+      return;
+    }
+
+    const mediaRepository = getRepository(Media);
+    const requestRepository = getRepository(MediaRequest);
+    const booklore = getBookLoreClient();
+
+    if (!booklore) {
+      logger.info(
+        'No BookLore server configured, skipping request processing',
+        {
+          label: 'Media Request',
+          requestId: entity.id,
+          mediaId: entity.media.id,
+        }
+      );
+      return;
+    }
+
+    try {
+      const wanted = await booklore.addWantedBookIfAbsent(
+        toWantedBookOptions(entity)
+      );
+
+      const media = await mediaRepository.findOne({
+        where: { id: entity.media.id },
+      });
+
+      if (media) {
+        media.bookloreWantedBookId = wanted.id;
+        media.status = MediaStatus.PROCESSING;
+        await mediaRepository.save(media);
+      }
+
+      if (getSettings().booklore.autoSearch) {
+        // Fire-and-forget: BookLore returns 202 and searches asynchronously.
+        booklore.searchAll().catch((e) => {
+          logger.warn('BookLore auto-search failed', {
+            label: 'Media Request',
+            errorMessage: e instanceof Error ? e.message : String(e),
+          });
+        });
+      }
+
+      logger.info(`Added "${entity.bookTitle}" to the BookLore wanted list`, {
+        label: 'Media Request',
+        requestId: entity.id,
+        wantedBookId: wanted.id,
+      });
+    } catch (e) {
+      logger.error('Something went wrong sending request to BookLore', {
+        label: 'Media Request',
+        requestId: entity.id,
+        errorMessage: e instanceof Error ? e.message : String(e),
+      });
+
+      entity.status = MediaRequestStatus.FAILED;
+      await requestRepository.save(entity);
+
+      notificationManager.sendNotification(Notification.MEDIA_FAILED, {
+        event: 'Book Request Failed',
+        notifyAdmin: true,
+        notifySystem: true,
+        subject: entity.bookTitle ?? 'Book request',
+        message: truncate(entity.bookAuthor ?? '', { length: 500 }),
+        media: entity.media,
+        request: entity,
       });
     }
   }
@@ -285,6 +379,14 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           apiKey: radarrSettings.apiKey,
           url: RadarrAPI.buildUrl(radarrSettings, '/api/v3'),
         });
+        if (!entity.media.tmdbId) {
+          logger.error('Movie request has no TMDB ID, skipping Radarr push', {
+            label: 'Media Request',
+            requestId: entity.id,
+          });
+          return;
+        }
+
         const movie = await tmdb.getMovie({ movieId: entity.media.tmdbId });
 
         const media = await mediaRepository.findOne({
@@ -563,6 +665,14 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           apiKey: sonarrSettings.apiKey,
           url: SonarrAPI.buildUrl(sonarrSettings, '/api/v3'),
         });
+        if (!media.tmdbId) {
+          logger.error('Series request has no TMDB ID, skipping Sonarr push', {
+            label: 'Media Request',
+            requestId: entity.id,
+          });
+          return;
+        }
+
         const series = await tmdb.getTvShow({ tvId: media.tmdbId });
         const tvdbId = series.external_ids.tvdb_id ?? media.tvdbId;
 
@@ -1011,6 +1121,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     try {
       await this.sendToRadarr(event.entity as MediaRequest);
       await this.sendToSonarr(event.entity as MediaRequest);
+      await this.sendToBookLore(event.entity as MediaRequest);
     } catch (e) {
       logger.error('Error while sending to *arr in afterUpdate subscriber', {
         label: 'Media Request',
@@ -1050,6 +1161,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     try {
       await this.sendToRadarr(event.entity as MediaRequest);
       await this.sendToSonarr(event.entity as MediaRequest);
+      await this.sendToBookLore(event.entity as MediaRequest);
     } catch (e) {
       logger.error('Error while sending to *arr in afterInsert subscriber', {
         label: 'Media Request',

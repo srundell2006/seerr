@@ -316,21 +316,22 @@ const ManageSlideOver = ({
             </div>
           </div>
         )}
-        {data.mediaInfo?.status === MediaStatus.BLOCKLISTED && (
-          <div>
-            <h3 className="mb-2 text-xl font-bold">
-              {intl.formatMessage(globalMessages.blocklist)}
-            </h3>
-            <div className="overflow-hidden rounded-md border border-gray-700 shadow">
-              <BlocklistBlock
-                tmdbId={data.mediaInfo.tmdbId}
-                mediaType={data.mediaInfo.mediaType}
-                onUpdate={() => revalidate()}
-                onDelete={() => onClose()}
-              />
+        {data.mediaInfo?.status === MediaStatus.BLOCKLISTED &&
+          data.mediaInfo.tmdbId !== undefined && (
+            <div>
+              <h3 className="mb-2 text-xl font-bold">
+                {intl.formatMessage(globalMessages.blocklist)}
+              </h3>
+              <div className="overflow-hidden rounded-md border border-gray-700 shadow">
+                <BlocklistBlock
+                  tmdbId={data.mediaInfo.tmdbId}
+                  mediaType={data.mediaInfo.mediaType}
+                  onUpdate={() => revalidate()}
+                  onDelete={() => onClose()}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
         {hasPermission(Permission.ADMIN) &&
           (data.mediaInfo?.serviceUrl ||
             data.mediaInfo?.tautulliUrl ||

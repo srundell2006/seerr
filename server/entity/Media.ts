@@ -87,13 +87,39 @@ class Media {
   @Column({ type: 'varchar' })
   public mediaType: MediaType;
 
-  @Column()
+  /**
+   * Nullable since books have no TMDB identity. For movie and TV rows this is
+   * still effectively required — the request path always supplies it — but the
+   * column cannot carry NOT NULL any more now that BOOK rows exist.
+   */
+  @Column({ nullable: true })
   @Index()
-  public tmdbId: number;
+  public tmdbId?: number;
 
   @Column({ unique: true, nullable: true })
   @Index()
   public tvdbId?: number;
+
+  /** Book identity. Only populated for mediaType BOOK. */
+  @Column({ nullable: true })
+  @Index()
+  public isbn13?: string;
+
+  /**
+   * Audiobook identity. Indexed separately from isbn13 on purpose: an
+   * audiobook and its ebook edition share a title but never an ASIN.
+   */
+  @Column({ nullable: true })
+  @Index()
+  public asin?: string;
+
+  /** Id of the corresponding entry on BookLore's wanted list. */
+  @Column({ nullable: true })
+  public bookloreWantedBookId?: number;
+
+  /** Id of the imported book in BookLore's library, once fulfilled. */
+  @Column({ nullable: true })
+  public bookloreBookId?: number;
 
   @Column({ nullable: true })
   @Index()

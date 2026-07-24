@@ -174,7 +174,7 @@ class RadarrScanner
       });
 
       for (const media of processingMovies) {
-        if (!this.scannedTmdbIds.has(media.tmdbId)) {
+        if (media.tmdbId && !this.scannedTmdbIds.has(media.tmdbId)) {
           media.status = MediaStatus.UNKNOWN;
           await mediaRepository.save(media);
           await this.declineOrphanedRequests(media, false);
@@ -201,7 +201,7 @@ class RadarrScanner
       });
 
       for (const media of processing4kMovies) {
-        if (!this.scanned4kTmdbIds.has(media.tmdbId)) {
+        if (media.tmdbId && !this.scanned4kTmdbIds.has(media.tmdbId)) {
           media.status4k = MediaStatus.UNKNOWN;
           await mediaRepository.save(media);
           await this.declineOrphanedRequests(media, true);

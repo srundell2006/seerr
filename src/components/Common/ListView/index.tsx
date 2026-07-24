@@ -4,6 +4,7 @@ import TmdbTitleCard from '@app/components/TitleCard/TmdbTitleCard';
 import { Permission, useUser } from '@app/hooks/useUser';
 import useVerticalScroll from '@app/hooks/useVerticalScroll';
 import globalMessages from '@app/i18n/globalMessages';
+import { isTmdbWatchlistItem } from '@app/utils/mediaType';
 import { MediaStatus } from '@server/constants/media';
 import type { WatchlistItem } from '@server/interfaces/api/discoverInterfaces';
 import type {
@@ -50,7 +51,7 @@ const ListView = ({
         </div>
       )}
       <ul className="cards-vertical">
-        {plexItems?.map((title, index) => {
+        {plexItems?.filter(isTmdbWatchlistItem).map((title, index) => {
           return (
             <li key={`${title.ratingKey}-${index}`}>
               <TmdbTitleCard

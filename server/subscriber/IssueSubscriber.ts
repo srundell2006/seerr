@@ -25,20 +25,29 @@ export class IssueSubscriber implements EntitySubscriberInterface<Issue> {
     const tmdb = new TheMovieDb();
 
     try {
-      if (entity.media.mediaType === MediaType.MOVIE) {
+      if (entity.media.mediaType === MediaType.MOVIE && entity.media.tmdbId) {
         const movie = await tmdb.getMovie({ movieId: entity.media.tmdbId });
 
         title = `${movie.title}${
           movie.release_date ? ` (${movie.release_date.slice(0, 4)})` : ''
         }`;
         image = `https://image.tmdb.org/t/p/w600_and_h900_bestv2${movie.poster_path}`;
-      } else {
+      } else if (
+        entity.media.mediaType === MediaType.TV &&
+        entity.media.tmdbId
+      ) {
         const tvshow = await tmdb.getTvShow({ tvId: entity.media.tmdbId });
 
         title = `${tvshow.name}${
           tvshow.first_air_date ? ` (${tvshow.first_air_date.slice(0, 4)})` : ''
         }`;
         image = `https://image.tmdb.org/t/p/w600_and_h900_bestv2${tvshow.poster_path}`;
+      } else {
+        // Books have no TMDB record to enrich from. Previously the `else`
+        // branch was unconditionally the TV path, which would have called
+        // getTvShow with an undefined id.
+        title = `Media #${entity.media.id}`;
+        image = '';
       }
 
       const [firstComment] = sortBy(entity.comments, 'id');

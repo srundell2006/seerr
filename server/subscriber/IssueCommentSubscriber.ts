@@ -39,20 +39,25 @@ export class IssueCommentSubscriber implements EntitySubscriberInterface<IssueCo
         where: { id: issue.media.id },
       });
 
-      if (media.mediaType === MediaType.MOVIE) {
+      if (media.mediaType === MediaType.MOVIE && media.tmdbId) {
         const movie = await tmdb.getMovie({ movieId: media.tmdbId });
 
         title = `${movie.title}${
           movie.release_date ? ` (${movie.release_date.slice(0, 4)})` : ''
         }`;
         image = `https://image.tmdb.org/t/p/w600_and_h900_bestv2${movie.poster_path}`;
-      } else {
+      } else if (media.mediaType === MediaType.TV && media.tmdbId) {
         const tvshow = await tmdb.getTvShow({ tvId: media.tmdbId });
 
         title = `${tvshow.name}${
           tvshow.first_air_date ? ` (${tvshow.first_air_date.slice(0, 4)})` : ''
         }`;
         image = `https://image.tmdb.org/t/p/w600_and_h900_bestv2${tvshow.poster_path}`;
+      } else {
+        // Books have no TMDB record; the old `else` was the unconditional TV
+        // path and would have called getTvShow with an undefined id.
+        title = `Media #${media.id}`;
+        image = '';
       }
 
       const [firstComment] = sortBy(issue.comments, 'id');

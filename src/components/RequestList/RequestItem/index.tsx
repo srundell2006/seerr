@@ -10,6 +10,7 @@ import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
+import { isTmdbMediaType } from '@app/utils/mediaType';
 import { refreshIntervalHelper } from '@app/utils/refreshIntervalHelper';
 import {
   ArrowPathIcon,
@@ -48,6 +49,7 @@ const messages = defineMessages('components.RequestList.RequestItem', {
   unknowntitle: 'Unknown Title',
   removearr: 'Remove from {arr}',
   profileName: 'Profile',
+  bookauthor: 'Author',
 });
 
 const isMovie = (movie: MovieDetails | TvDetails): movie is MovieDetails => {
@@ -86,24 +88,28 @@ const RequestItemError = ({
           <div className="flex text-lg font-bold text-white xl:text-xl">
             {intl.formatMessage(messages.mediaerror, {
               mediaType: intl.formatMessage(
-                requestData?.type
+                isTmdbMediaType(requestData?.type)
                   ? requestData?.type === 'movie'
                     ? globalMessages.movie
                     : globalMessages.tvshow
-                  : globalMessages.request
+                  : requestData?.type === 'book'
+                    ? globalMessages.book
+                    : globalMessages.request
               ),
             })}
           </div>
           {requestData && hasPermission(Permission.MANAGE_REQUESTS) && (
             <>
-              <div className="card-field">
-                <span className="card-field-name">
-                  {intl.formatMessage(messages.tmdbid)}
-                </span>
-                <span className="flex truncate text-sm text-gray-300">
-                  {requestData.media.tmdbId}
-                </span>
-              </div>
+              {requestData.media.tmdbId !== undefined && (
+                <div className="card-field">
+                  <span className="card-field-name">
+                    {intl.formatMessage(messages.tmdbid)}
+                  </span>
+                  <span className="flex truncate text-sm text-gray-300">
+                    {requestData.media.tmdbId}
+                  </span>
+                </div>
+              )}
               {requestData.media.tvdbId && (
                 <div className="card-field">
                   <span className="card-field-name">
@@ -154,7 +160,11 @@ const RequestItemError = ({
                       ).length > 0
                     }
                     is4k={requestData.is4k}
-                    mediaType={requestData.type}
+                    mediaType={
+                      isTmdbMediaType(requestData.type)
+                        ? requestData.type
+                        : undefined
+                    }
                     plexUrl={requestData.is4k ? plexUrl4k : plexUrl}
                     serviceUrl={
                       requestData.is4k
@@ -303,12 +313,18 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
   const intl = useIntl();
   const { user, hasPermission } = useUser();
   const [showEditModal, setShowEditModal] = useState(false);
-  const url =
-    request.type === 'movie'
-      ? `/api/v1/movie/${request.media.tmdbId}`
-      : `/api/v1/tv/${request.media.tmdbId}`;
+  // Book requests carry their own title/author and have no TMDB record, so
+  // there is nothing to fetch, no poster or backdrop to show, and no
+  // /movie|/tv deep link to build for them.
+  const tmdbRequest =
+    isTmdbMediaType(request.type) && request.media.tmdbId !== undefined
+      ? { tmdbId: request.media.tmdbId, type: request.type }
+      : undefined;
+  const url = tmdbRequest
+    ? `/api/v1/${tmdbRequest.type}/${tmdbRequest.tmdbId}`
+    : null;
   const { data: title, error } = useSWR<MovieDetails | TvDetails>(
-    inView ? url : null
+    inView && url ? url : null
   );
   const { data: requestData, mutate: revalidate } = useSWR<
     NonFunctionProperties<MediaRequest>
@@ -385,7 +401,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
     iOSPlexUrl4k: requestData?.media?.iOSPlexUrl4k,
   });
 
-  if (!title && !error) {
+  if (tmdbRequest && !title && !error) {
     return (
       <div
         className="h-64 w-full animate-pulse rounded-xl bg-gray-800 xl:h-28"
@@ -394,7 +410,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
     );
   }
 
-  if (!title || !requestData) {
+  if (!requestData || (tmdbRequest && !title)) {
     return (
       <RequestItemError
         requestData={requestData}
@@ -405,20 +421,22 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
 
   return (
     <>
-      <RequestModal
-        show={showEditModal}
-        tmdbId={request.media.tmdbId}
-        type={request.type}
-        is4k={request.is4k}
-        editRequest={request}
-        onCancel={() => setShowEditModal(false)}
-        onComplete={() => {
-          revalidateList();
-          setShowEditModal(false);
-        }}
-      />
+      {tmdbRequest && (
+        <RequestModal
+          show={showEditModal}
+          tmdbId={tmdbRequest.tmdbId}
+          type={tmdbRequest.type}
+          is4k={request.is4k}
+          editRequest={request}
+          onCancel={() => setShowEditModal(false)}
+          onComplete={() => {
+            revalidateList();
+            setShowEditModal(false);
+          }}
+        />
+      )}
       <div className="relative flex w-full flex-col justify-between overflow-hidden rounded-xl bg-gray-800 py-2 text-gray-400 shadow-md ring-1 ring-gray-700 xl:h-28 xl:flex-row">
-        {title.backdropPath && (
+        {title?.backdropPath && (
           <div className="absolute inset-0 z-0 w-full bg-cover bg-center xl:w-2/3">
             <CachedImage
               type="tmdb"
@@ -438,46 +456,59 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
         )}
         <div className="relative flex w-full flex-col justify-between overflow-hidden sm:flex-row">
           <div className="relative z-10 flex w-full items-center overflow-hidden pl-4 pr-4 sm:pr-0 xl:w-7/12 2xl:w-2/3">
-            <Link
-              href={
-                requestData.type === 'movie'
-                  ? `/movie/${requestData.media.tmdbId}`
-                  : `/tv/${requestData.media.tmdbId}`
-              }
-              className="relative h-auto w-12 flex-shrink-0 scale-100 transform-gpu overflow-hidden rounded-md transition duration-300 hover:scale-105"
-            >
-              <CachedImage
-                type="tmdb"
-                src={
-                  title.posterPath
-                    ? `https://image.tmdb.org/t/p/w600_and_h900_bestv2${title.posterPath}`
-                    : '/images/seerr_poster_not_found.png'
-                }
-                alt=""
-                sizes="100vw"
-                style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
-                width={600}
-                height={900}
-              />
-            </Link>
-            <div className="flex flex-col justify-center overflow-hidden pl-2 xl:pl-4">
-              <div className="pt-0.5 text-xs font-medium text-white sm:pt-1">
-                {(isMovie(title)
-                  ? title.releaseDate
-                  : title.firstAirDate
-                )?.slice(0, 4)}
-              </div>
+            {tmdbRequest && title && (
               <Link
-                href={
-                  requestData.type === 'movie'
-                    ? `/movie/${requestData.media.tmdbId}`
-                    : `/tv/${requestData.media.tmdbId}`
-                }
-                className="mr-2 min-w-0 truncate text-lg font-bold text-white hover:underline xl:text-xl"
+                href={`/${tmdbRequest.type}/${tmdbRequest.tmdbId}`}
+                className="relative h-auto w-12 flex-shrink-0 scale-100 transform-gpu overflow-hidden rounded-md transition duration-300 hover:scale-105"
               >
-                {isMovie(title) ? title.title : title.name}
+                <CachedImage
+                  type="tmdb"
+                  src={
+                    title.posterPath
+                      ? `https://image.tmdb.org/t/p/w600_and_h900_bestv2${title.posterPath}`
+                      : '/images/seerr_poster_not_found.png'
+                  }
+                  alt=""
+                  sizes="100vw"
+                  style={{ width: '100%', height: 'auto', objectFit: 'cover' }}
+                  width={600}
+                  height={900}
+                />
               </Link>
-              {!isMovie(title) && request.seasons.length > 0 && (
+            )}
+            <div className="flex flex-col justify-center overflow-hidden pl-2 xl:pl-4">
+              {title && (
+                <div className="pt-0.5 text-xs font-medium text-white sm:pt-1">
+                  {(isMovie(title)
+                    ? title.releaseDate
+                    : title.firstAirDate
+                  )?.slice(0, 4)}
+                </div>
+              )}
+              {tmdbRequest && title ? (
+                <Link
+                  href={`/${tmdbRequest.type}/${tmdbRequest.tmdbId}`}
+                  className="mr-2 min-w-0 truncate text-lg font-bold text-white hover:underline xl:text-xl"
+                >
+                  {isMovie(title) ? title.title : title.name}
+                </Link>
+              ) : (
+                <div className="mr-2 min-w-0 truncate text-lg font-bold text-white xl:text-xl">
+                  {request.bookTitle ??
+                    intl.formatMessage(messages.unknowntitle)}
+                </div>
+              )}
+              {!tmdbRequest && request.bookAuthor && (
+                <div className="card-field">
+                  <span className="card-field-name">
+                    {intl.formatMessage(messages.bookauthor)}
+                  </span>
+                  <span className="truncate text-sm text-gray-300">
+                    {request.bookAuthor}
+                  </span>
+                </div>
+              )}
+              {title && !isMovie(title) && request.seasons.length > 0 && (
                 <div className="card-field">
                   <span className="card-field-name">
                     {intl.formatMessage(messages.seasons, {
@@ -511,7 +542,11 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
               ) : requestData.status === MediaRequestStatus.FAILED ? (
                 <Badge
                   badgeType="danger"
-                  href={`/${requestData.type}/${requestData.media.tmdbId}?manage=1`}
+                  href={
+                    tmdbRequest
+                      ? `/${tmdbRequest.type}/${tmdbRequest.tmdbId}?manage=1`
+                      : undefined
+                  }
                 >
                   {intl.formatMessage(globalMessages.failed)}
                 </Badge>
@@ -520,7 +555,11 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                   MediaStatus.DELETED ? (
                 <Badge
                   badgeType="warning"
-                  href={`/${requestData.type}/${requestData.media.tmdbId}?manage=1`}
+                  href={
+                    tmdbRequest
+                      ? `/${tmdbRequest.type}/${tmdbRequest.tmdbId}?manage=1`
+                      : undefined
+                  }
                 >
                   {intl.formatMessage(globalMessages.pending)}
                 </Badge>
@@ -534,7 +573,13 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                       requestData.is4k ? 'downloadStatus4k' : 'downloadStatus'
                     ]
                   }
-                  title={isMovie(title) ? title.title : title.name}
+                  title={
+                    title
+                      ? isMovie(title)
+                        ? title.title
+                        : title.name
+                      : request.bookTitle
+                  }
                   inProgress={
                     (
                       requestData.media[
@@ -544,7 +589,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                   }
                   is4k={requestData.is4k}
                   tmdbId={requestData.media.tmdbId}
-                  mediaType={requestData.type}
+                  mediaType={tmdbRequest?.type}
                   plexUrl={requestData.is4k ? plexUrl4k : plexUrl}
                   serviceUrl={
                     requestData.is4k
@@ -703,7 +748,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                   <TrashIcon />
                   <span>{intl.formatMessage(messages.deleterequest)}</span>
                 </ConfirmButton>
-                {request.canRemove && (
+                {tmdbRequest && request.canRemove && (
                   <ConfirmButton
                     onClick={() => deleteMediaFile()}
                     confirmText={intl.formatMessage(globalMessages.areyousure)}
@@ -712,7 +757,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                     <TrashIcon />
                     <span>
                       {intl.formatMessage(messages.removearr, {
-                        arr: request.type === 'movie' ? 'Radarr' : 'Sonarr',
+                        arr: tmdbRequest.type === 'movie' ? 'Radarr' : 'Sonarr',
                       })}
                     </span>
                   </ConfirmButton>
@@ -746,7 +791,8 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                 </span>
               </div>
             )}
-          {requestData.status === MediaRequestStatus.PENDING &&
+          {tmdbRequest &&
+            requestData.status === MediaRequestStatus.PENDING &&
             (hasPermission(Permission.MANAGE_REQUESTS) ||
               (requestData.requestedBy.id === user?.id &&
                 (requestData.type === 'tv' ||

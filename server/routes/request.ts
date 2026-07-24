@@ -21,6 +21,7 @@ import type {
   MediaRequestBody,
   RequestResultsResponse,
 } from '@server/interfaces/api/requestInterfaces';
+import { bookRequestSchema, createBookRequest } from '@server/lib/bookrequests';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -173,6 +174,11 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
             type: MediaType.TV,
           });
           break;
+        case 'book':
+          query = query.andWhere('request.type = :type', {
+            type: MediaType.BOOK,
+          });
+          break;
       }
 
       const [requests, requestCount] = await query
@@ -234,6 +240,11 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
                 ?.profiles?.find((profile) => profile.id === r.profileId)?.name,
             };
           }
+          // Books have no quality profile — without this case the map would
+          // return undefined for every book request and drop it from the list.
+          case MediaType.BOOK: {
+            return { ...r, profileName: undefined };
+          }
         }
       });
 
@@ -262,6 +273,11 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
                     (r.is4k ? r.media.serviceId4k : r.media.serviceId)
                 ),
               };
+            }
+            // There is no "remove from BookLore" equivalent, and omitting the
+            // case would drop book requests out of the list entirely.
+            case MediaType.BOOK: {
+              return { ...r, canRemove: false };
             }
           }
         });
@@ -310,6 +326,25 @@ requestRoutes.post<never, MediaRequest, MediaRequestBody>(
           message: 'You must be logged in to request media.',
         });
       }
+
+      // Books take a separate path. MediaRequest.request() is built around the
+      // TMDB pipeline and its final branch treats anything that is not MOVIE
+      // as TV, so an unbranched book request would fall into the season code
+      // and blow up on getTvShow.
+      if (req.body.mediaType === MediaType.BOOK) {
+        const parsed = bookRequestSchema.safeParse(req.body);
+
+        if (!parsed.success) {
+          return next({
+            status: 400,
+            message: 'Invalid book request payload.',
+          });
+        }
+
+        const bookRequest = await createBookRequest(parsed.data, req.user);
+        return res.status(201).json(bookRequest);
+      }
+
       const request = await MediaRequest.request(req.body, req.user);
 
       return res.status(201).json(request);
