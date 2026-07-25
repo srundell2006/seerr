@@ -1,6 +1,10 @@
-import type { BookLookupResult, WantedBook } from '@server/api/booklore';
+import type {
+  BookLookupResult,
+  MetadataProvider,
+  WantedBook,
+} from '@server/api/booklore';
 import { getBookLoreClient } from '@server/api/booklore';
-import { MediaType } from '@server/constants/media';
+import { MediaStatus, MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import bookLoreTracker from '@server/lib/bookloretracker';
@@ -11,9 +15,61 @@ import { In } from 'typeorm';
 
 const bookRoutes = Router();
 
-export interface BookSearchResult extends BookLookupResult {
+export interface BookSearchResult extends Omit<BookLookupResult, 'provider'> {
+  /** 'Library' marks a result answered from Seerr's own synced rows. */
+  provider: MetadataProvider | 'Library';
   mediaInfo?: { id: number; status: number } | null;
 }
+
+/** ISBN-13 / ISBN-10 once hyphens and spaces are stripped. */
+const ISBN_PATTERN = /^(?:\d{13}|\d{9}[\dXx])$/;
+const ASIN_PATTERN = /^B[0-9A-Z]{9}$/i;
+
+const stripIsbnPunctuation = (value: string): string =>
+  value.replace(/[\s-]/g, '');
+
+/**
+ * Answers identifier searches from Seerr's own synced library before going
+ * near BookLore.
+ *
+ * A BookLore lookup costs ~46s because it fans out across twelve metadata
+ * providers. For a book already on the shelf that is entirely wasted — the
+ * library scan has the answer locally, indexed on isbn13 and asin.
+ */
+const findInSyncedLibrary = async (
+  query: string
+): Promise<BookSearchResult | null> => {
+  const compact = stripIsbnPunctuation(query);
+  const isIsbn = ISBN_PATTERN.test(compact);
+  const isAsin = ASIN_PATTERN.test(query);
+
+  if (!isIsbn && !isAsin) {
+    return null;
+  }
+
+  const media = await getRepository(Media).findOne({
+    where: isIsbn
+      ? { mediaType: MediaType.BOOK, isbn13: compact }
+      : { mediaType: MediaType.BOOK, asin: query.toUpperCase() },
+  });
+
+  if (!media || media.status !== MediaStatus.AVAILABLE) {
+    return null;
+  }
+
+  return {
+    title: media.bookTitle ?? query,
+    authors: media.bookAuthor ? [media.bookAuthor] : [],
+    isbn13: media.isbn13 ?? null,
+    asin: media.asin ?? null,
+    thumbnailUrl: media.bookThumbnailUrl ?? null,
+    provider: 'Library',
+    inLibrary: true,
+    existingBookId: media.bookloreBookId ?? null,
+    alreadyWanted: false,
+    mediaInfo: { id: media.id, status: media.status },
+  };
+};
 
 /**
  * Exported so /api/v1/search/books can share the exact same handler — the UI
@@ -40,6 +96,17 @@ export const bookSearchHandler: RequestHandler = async (req, res, next) => {
   }
 
   try {
+    // Identifier searches for books we already have never need to touch
+    // BookLore, which turns a ~46s wait into a local index hit.
+    const local = await findInSyncedLibrary(query);
+
+    if (local) {
+      logger.debug(`Answered "${query}" from the synced library`, {
+        label: 'Books',
+      });
+      return res.status(200).json({ results: [local] });
+    }
+
     const results = await booklore.lookup(query);
     const decorated = await decorateWithMediaInfo(results);
 
