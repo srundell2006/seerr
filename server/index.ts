@@ -250,7 +250,12 @@ app
     server.get('*path', (req, res) => handle(req, res));
     server.use(
       (
-        err: { status: number; message: string; errors: string[] },
+        err: {
+          status: number;
+          message: string;
+          errors: string[];
+          code?: string;
+        },
         _req: Request,
         res: Response,
         // We must provide a next function for the function signature here even though its not used
@@ -261,6 +266,10 @@ app
         res.status(err.status || 500).json({
           message: err.message,
           errors: err.errors,
+          // Machine-readable discriminator. Without this the client can only
+          // string-match the message, which is how "not configured" ended up
+          // being shown for what was actually a timeout.
+          code: err.code,
         });
       }
     );

@@ -1,32 +1,43 @@
-import WantedList from '@app/components/BookSearch/WantedList';
 import Badge from '@app/components/Common/Badge';
 import Button from '@app/components/Common/Button';
-import Header from '@app/components/Common/Header';
-import LoadingSpinner from '@app/components/Common/LoadingSpinner';
+import { SmallLoadingSpinner } from '@app/components/Common/LoadingSpinner';
 import Modal from '@app/components/Common/Modal';
-import PageTitle from '@app/components/Common/PageTitle';
-import useDebouncedState from '@app/hooks/useDebouncedState';
 import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
-import { BookOpenIcon, MagnifyingGlassIcon } from '@heroicons/react/24/solid';
+import {
+  ArrowPathIcon,
+  BookOpenIcon,
+  ClockIcon,
+  ExclamationTriangleIcon,
+  MagnifyingGlassIcon,
+} from '@heroicons/react/24/solid';
 import { MediaStatus } from '@server/constants/media';
 import axios from 'axios';
 import Link from 'next/link';
+import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { useIntl } from 'react-intl';
 import useSWR, { mutate } from 'swr';
 
 const messages = defineMessages('components.BookSearch', {
-  books: 'Books',
   searchPlaceholder: 'Search for books by title, author, or ISBN',
-  startSearching: 'Start typing to search for books.',
+  search: 'Search',
+  searching: 'Searching…',
+  startSearching:
+    'Enter a title, author, or ISBN above and press Search to look for books.',
+  searchInProgress:
+    "Searching BookLore's metadata providers — this can take up to a minute.",
   nobooksfound: 'No books found.',
   bookloreNotConfigured: 'BookLore is not configured.',
   bookloreNotConfiguredDescription:
     'Books cannot be searched or requested until BookLore has been set up.',
   configureBooklore: 'Configure BookLore',
+  bookloreTimedOut: 'The book search timed out.',
+  bookloreTimedOutDescription:
+    "BookLore's metadata providers took too long to respond. Try again, or use a more specific search such as an ISBN.",
+  bookloreSearchFailed: 'The book search failed.',
   unknownAuthor: 'Unknown Author',
   requestBook: 'Request Book',
   preferredFormat: 'Preferred Format',
@@ -65,16 +76,46 @@ interface BookSearchResponse {
   results: BookSearchResult[];
 }
 
+/**
+ * The books API distinguishes its failure modes with a machine readable code so
+ * that a slow provider is never reported as a misconfiguration.
+ */
+type BookErrorCode =
+  | 'BOOKLORE_NOT_CONFIGURED'
+  | 'BOOKLORE_TIMEOUT'
+  | 'BOOKLORE_SEARCH_FAILED';
+
+interface BookErrorBody {
+  message?: string;
+  code?: BookErrorCode | string;
+}
+
+const getErrorBody = (error: unknown): BookErrorBody => {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data;
+
+    if (data && typeof data === 'object') {
+      return data as BookErrorBody;
+    }
+  }
+
+  return {};
+};
+
 const getResultKey = (book: BookSearchResult): string =>
   book.isbn13 ??
   book.asin ??
   book.isbn10 ??
   `${book.provider}-${book.title}-${book.authors.join(',')}`;
 
-const BookThumbnail = ({ book }: { book: BookSearchResult }) => {
+export const BookThumbnail = ({
+  thumbnailUrl,
+}: {
+  thumbnailUrl?: string | null;
+}) => {
   const [hasError, setHasError] = useState(false);
 
-  if (!book.thumbnailUrl || hasError) {
+  if (!thumbnailUrl || hasError) {
     return (
       <div className="flex h-28 w-20 flex-shrink-0 items-center justify-center rounded-md bg-gray-700 text-gray-500 ring-1 ring-gray-600">
         <BookOpenIcon className="h-8 w-8" />
@@ -85,7 +126,7 @@ const BookThumbnail = ({ book }: { book: BookSearchResult }) => {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={book.thumbnailUrl}
+      src={thumbnailUrl}
       alt=""
       className="h-28 w-20 flex-shrink-0 rounded-md object-cover ring-1 ring-gray-600"
       onError={() => setHasError(true)}
@@ -98,10 +139,8 @@ const BookSearch = () => {
   const { addToast } = useToasts();
   const { hasPermission } = useUser();
 
-  const [searchValue, debouncedSearchValue, setSearchValue] = useDebouncedState(
-    '',
-    400
-  );
+  const [searchValue, setSearchValue] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
   const [requestedKeys, setRequestedKeys] = useState<string[]>([]);
   const [selectedBook, setSelectedBook] = useState<BookSearchResult | null>(
     null
@@ -110,24 +149,50 @@ const BookSearch = () => {
     useState<PreferredFormat>('ANY');
   const [isRequesting, setIsRequesting] = useState(false);
 
-  const trimmedQuery = debouncedSearchValue.trim();
-
-  const { data, error, isLoading } = useSWR<BookSearchResponse>(
-    trimmedQuery
-      ? `/api/v1/search/books?query=${encodeURIComponent(trimmedQuery)}`
+  // A lookup fans out to a dozen metadata providers and routinely takes the
+  // better part of a minute, so the request only fires on an explicit submit.
+  const {
+    data,
+    error,
+    isValidating,
+    mutate: revalidate,
+  } = useSWR<BookSearchResponse>(
+    submittedQuery
+      ? `/api/v1/book/search?query=${encodeURIComponent(submittedQuery)}`
       : null,
     {
       revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
       shouldRetryOnError: false,
+      keepPreviousData: true,
     }
   );
 
   const canRequest = hasPermission(Permission.REQUEST_BOOK);
-  // The books search endpoint responds with a 500 when BookLore has not been
-  // set up yet, which we surface as a dedicated empty state.
-  const isNotConfigured =
-    !!error && (!axios.isAxiosError(error) || error.response?.status === 500);
-  const hasError = !!error && !isNotConfigured;
+  const errorBody = error ? getErrorBody(error) : undefined;
+  const errorCode = errorBody?.code;
+  const isNotConfigured = !!error && errorCode === 'BOOKLORE_NOT_CONFIGURED';
+  const hasTimedOut = !!error && errorCode === 'BOOKLORE_TIMEOUT';
+  const hasGenericError = !!error && !isNotConfigured && !hasTimedOut;
+
+  const search = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    const trimmedQuery = searchValue.trim();
+
+    if (!trimmedQuery || isValidating) {
+      return;
+    }
+
+    if (trimmedQuery === submittedQuery) {
+      // The key is unchanged, so SWR will not refetch on its own.
+      revalidate();
+      return;
+    }
+
+    setSubmittedQuery(trimmedQuery);
+  };
 
   const requestBook = async () => {
     if (!selectedBook) {
@@ -238,9 +303,70 @@ const BookSearch = () => {
     );
   };
 
+  const renderResults = () => {
+    if (!submittedQuery && !data) {
+      return (
+        <div className="mt-16 w-full text-center text-2xl text-gray-400">
+          {intl.formatMessage(messages.startSearching)}
+        </div>
+      );
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    if (!data.results.length) {
+      return isValidating ? null : (
+        <div className="mt-16 w-full text-center text-2xl text-gray-400">
+          {intl.formatMessage(messages.nobooksfound)}
+        </div>
+      );
+    }
+
+    return (
+      <ul
+        className={`space-y-4 transition-opacity duration-300 ${
+          isValidating ? 'opacity-50' : ''
+        }`}
+      >
+        {data.results.map((book) => (
+          <li
+            key={getResultKey(book)}
+            className="flex w-full items-start space-x-4 rounded-xl bg-gray-800 p-4 text-gray-400 shadow-md ring-1 ring-gray-700"
+          >
+            <BookThumbnail thumbnailUrl={book.thumbnailUrl} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-lg font-bold text-white">
+                {book.title}
+              </div>
+              <div className="truncate text-sm text-gray-300">
+                {book.authors.length
+                  ? book.authors.join(', ')
+                  : intl.formatMessage(messages.unknownAuthor)}
+              </div>
+              {(book.publisher || book.publishedYear) && (
+                <div className="truncate text-sm text-gray-400">
+                  {[book.publisher, book.publishedYear]
+                    .filter(Boolean)
+                    .join(' • ')}
+                </div>
+              )}
+              <div className="mt-2">
+                <Badge badgeType="light">{book.provider}</Badge>
+              </div>
+            </div>
+            <div className="flex flex-shrink-0 items-center">
+              {renderStatus(book)}
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
   return (
     <>
-      <PageTitle title={intl.formatMessage(messages.books)} />
       {selectedBook && (
         <Modal
           backgroundClickable
@@ -286,22 +412,41 @@ const BookSearch = () => {
           </div>
         </Modal>
       )}
-      <div className="mb-4 flex flex-col justify-between lg:flex-row lg:items-end">
-        <Header>{intl.formatMessage(messages.books)}</Header>
-        <div className="mt-2 flex flex-grow lg:mt-0 lg:max-w-md lg:flex-grow-0">
-          <span className="inline-flex cursor-default items-center rounded-l-md border border-r-0 border-gray-500 bg-gray-800 px-3 text-sm text-gray-100">
-            <MagnifyingGlassIcon className="h-6 w-6" />
+
+      <form className="mb-4 flex w-full lg:max-w-2xl" onSubmit={search}>
+        <span className="inline-flex cursor-default items-center rounded-l-md border border-r-0 border-gray-500 bg-gray-800 px-3 text-sm text-gray-100">
+          <MagnifyingGlassIcon className="h-6 w-6" />
+        </span>
+        <input
+          id="book-search"
+          type="text"
+          className="rounded-none border-r-0"
+          placeholder={intl.formatMessage(messages.searchPlaceholder)}
+          value={searchValue}
+          onChange={(e) => setSearchValue(e.target.value)}
+        />
+        <Button
+          type="submit"
+          buttonType="primary"
+          className="rounded-l-none"
+          disabled={isValidating || !searchValue.trim()}
+        >
+          <span>
+            {isValidating
+              ? intl.formatMessage(messages.searching)
+              : intl.formatMessage(messages.search)}
           </span>
-          <input
-            id="book-search"
-            type="text"
-            className="rounded-r-only"
-            placeholder={intl.formatMessage(messages.searchPlaceholder)}
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-          />
+        </Button>
+      </form>
+
+      {isValidating && (
+        <div className="mb-4 flex items-center space-x-3 rounded-xl bg-gray-800 p-4 text-gray-300 shadow-md ring-1 ring-gray-700">
+          <div className="h-10 w-10 flex-shrink-0">
+            <SmallLoadingSpinner />
+          </div>
+          <span>{intl.formatMessage(messages.searchInProgress)}</span>
         </div>
-      </div>
+      )}
 
       {isNotConfigured ? (
         <div className="mt-16 flex w-full flex-col items-center justify-center text-center">
@@ -318,57 +463,47 @@ const BookSearch = () => {
             </Button>
           </Link>
         </div>
-      ) : hasError ? (
-        <div className="mt-16 w-full text-center text-2xl text-gray-400">
-          {intl.formatMessage(globalMessages.error)}
+      ) : hasTimedOut ? (
+        <div className="mt-16 flex w-full flex-col items-center justify-center text-center">
+          <ClockIcon className="mb-4 h-12 w-12 text-gray-500" />
+          <span className="text-2xl text-gray-400">
+            {intl.formatMessage(messages.bookloreTimedOut)}
+          </span>
+          <span className="mt-2 text-gray-500">
+            {intl.formatMessage(messages.bookloreTimedOutDescription)}
+          </span>
+          <Button
+            buttonType="primary"
+            className="mt-4"
+            disabled={isValidating}
+            onClick={() => revalidate()}
+          >
+            <ArrowPathIcon />
+            <span>{intl.formatMessage(globalMessages.retry)}</span>
+          </Button>
         </div>
-      ) : !trimmedQuery ? (
-        <div className="mt-16 w-full text-center text-2xl text-gray-400">
-          {intl.formatMessage(messages.startSearching)}
-        </div>
-      ) : isLoading ? (
-        <LoadingSpinner />
-      ) : !data?.results.length ? (
-        <div className="mt-16 w-full text-center text-2xl text-gray-400">
-          {intl.formatMessage(messages.nobooksfound)}
+      ) : hasGenericError ? (
+        <div className="mt-16 flex w-full flex-col items-center justify-center text-center">
+          <ExclamationTriangleIcon className="mb-4 h-12 w-12 text-gray-500" />
+          <span className="text-2xl text-gray-400">
+            {intl.formatMessage(messages.bookloreSearchFailed)}
+          </span>
+          <span className="mt-2 text-gray-500">
+            {errorBody?.message || intl.formatMessage(globalMessages.error)}
+          </span>
+          <Button
+            buttonType="primary"
+            className="mt-4"
+            disabled={isValidating}
+            onClick={() => revalidate()}
+          >
+            <ArrowPathIcon />
+            <span>{intl.formatMessage(globalMessages.retry)}</span>
+          </Button>
         </div>
       ) : (
-        <ul className="space-y-4">
-          {data.results.map((book) => (
-            <li
-              key={getResultKey(book)}
-              className="flex w-full items-start space-x-4 rounded-xl bg-gray-800 p-4 text-gray-400 shadow-md ring-1 ring-gray-700"
-            >
-              <BookThumbnail book={book} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-lg font-bold text-white">
-                  {book.title}
-                </div>
-                <div className="truncate text-sm text-gray-300">
-                  {book.authors.length
-                    ? book.authors.join(', ')
-                    : intl.formatMessage(messages.unknownAuthor)}
-                </div>
-                {(book.publisher || book.publishedYear) && (
-                  <div className="truncate text-sm text-gray-400">
-                    {[book.publisher, book.publishedYear]
-                      .filter(Boolean)
-                      .join(' • ')}
-                  </div>
-                )}
-                <div className="mt-2">
-                  <Badge badgeType="light">{book.provider}</Badge>
-                </div>
-              </div>
-              <div className="flex flex-shrink-0 items-center">
-                {renderStatus(book)}
-              </div>
-            </li>
-          ))}
-        </ul>
+        renderResults()
       )}
-
-      {!isNotConfigured && <WantedList />}
     </>
   );
 };

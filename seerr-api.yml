@@ -6535,6 +6535,46 @@ paths:
                           type: string
                         title:
                           type: string
+  /book/library:
+    get:
+      summary: Get the synced BookLore library
+      description: |
+        Returns Seerr's own synced copy of BookLore's library, populated by the
+        BookLore Library Scan job.
+      tags:
+        - search
+      parameters:
+        - in: query
+          name: take
+          schema:
+            type: number
+            nullable: true
+            example: 20
+        - in: query
+          name: skip
+          schema:
+            type: number
+            nullable: true
+            example: 0
+        - in: query
+          name: search
+          schema:
+            type: string
+            nullable: true
+      responses:
+        '200':
+          description: Results returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pageInfo:
+                    $ref: '#/components/schemas/PageInfo'
+                  results:
+                    type: array
+                    items:
+                      type: object
   /book/search:
     get:
       summary: Search for books via BookLore

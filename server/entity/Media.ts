@@ -119,7 +119,22 @@ class Media {
 
   /** Id of the imported book in BookLore's library, once fulfilled. */
   @Column({ nullable: true })
+  @Index()
   public bookloreBookId?: number;
+
+  /**
+   * Display data for books. Movies and TV get this from TMDB on demand, but
+   * books have no such source — BookLore is the only place it exists, so the
+   * library sync denormalises it here rather than re-fetching per render.
+   */
+  @Column({ nullable: true })
+  public bookTitle?: string;
+
+  @Column({ nullable: true })
+  public bookAuthor?: string;
+
+  @Column({ nullable: true })
+  public bookThumbnailUrl?: string;
 
   @Column({ nullable: true })
   @Index()

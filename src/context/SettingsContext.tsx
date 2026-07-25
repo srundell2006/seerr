@@ -17,6 +17,7 @@ const defaultSettings = {
   localLogin: true,
   mediaServerLogin: true,
   movie4kEnabled: false,
+  bookloreEnabled: false,
   series4kEnabled: false,
   discoverRegion: '',
   streamingRegion: '',

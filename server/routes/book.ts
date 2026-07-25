@@ -22,10 +22,14 @@ export interface BookSearchResult extends BookLookupResult {
 export const bookSearchHandler: RequestHandler = async (req, res, next) => {
   const booklore = getBookLoreClient();
 
+  // Distinct codes matter here: the UI previously rendered every 500 as
+  // "BookLore is not configured", which sent a timeout hunt in entirely the
+  // wrong direction. Never collapse these three into one status again.
   if (!booklore) {
     return next({
-      status: 500,
+      status: 503,
       message: 'BookLore is not configured.',
+      code: 'BOOKLORE_NOT_CONFIGURED',
     });
   }
 
@@ -41,14 +45,89 @@ export const bookSearchHandler: RequestHandler = async (req, res, next) => {
 
     return res.status(200).json({ results: decorated });
   } catch (e) {
+    const isTimeout =
+      (e as { code?: string }).code === 'ECONNABORTED' ||
+      (e as { code?: string }).code === 'ETIMEDOUT';
+
     logger.error('Book search failed', {
+      label: 'Books',
+      errorMessage: e instanceof Error ? e.message : String(e),
+      isTimeout,
+    });
+
+    return next(
+      isTimeout
+        ? {
+            status: 504,
+            message:
+              "BookLore's metadata providers did not respond in time. Try a more specific title.",
+            code: 'BOOKLORE_TIMEOUT',
+          }
+        : {
+            status: 500,
+            message: 'Book search failed.',
+            code: 'BOOKLORE_SEARCH_FAILED',
+          }
+    );
+  }
+};
+
+/**
+ * Seerr's own synced copy of BookLore's library, populated by the BookLore
+ * Library Scan job. Read from the local table rather than BookLore so the UI
+ * is not paying ~46s per lookup just to answer "what do we already have".
+ */
+bookRoutes.get('/library', async (req, res, next) => {
+  try {
+    const pageSize = req.query.take ? Number(req.query.take) : 20;
+    const skip = req.query.skip ? Number(req.query.skip) : 0;
+    const search = (req.query.search as string | undefined)?.trim();
+
+    let query = getRepository(Media)
+      .createQueryBuilder('media')
+      .where('media.mediaType = :mediaType', { mediaType: MediaType.BOOK })
+      .andWhere('media.bookloreBookId IS NOT NULL');
+
+    if (search) {
+      query = query.andWhere(
+        '(LOWER(media.bookTitle) LIKE :search OR LOWER(media.bookAuthor) LIKE :search)',
+        { search: `%${search.toLowerCase()}%` }
+      );
+    }
+
+    const [items, count] = await query
+      .orderBy('media.bookTitle', 'ASC')
+      .take(pageSize)
+      .skip(skip)
+      .getManyAndCount();
+
+    return res.status(200).json({
+      pageInfo: {
+        pages: Math.ceil(count / pageSize),
+        pageSize,
+        results: count,
+        page: Math.ceil(skip / pageSize) + 1,
+      },
+      results: items.map((media) => ({
+        id: media.id,
+        bookloreBookId: media.bookloreBookId,
+        title: media.bookTitle,
+        author: media.bookAuthor,
+        isbn13: media.isbn13,
+        asin: media.asin,
+        thumbnailUrl: media.bookThumbnailUrl,
+        status: media.status,
+      })),
+    });
+  } catch (e) {
+    logger.error('Failed to read the synced book library', {
       label: 'Books',
       errorMessage: e instanceof Error ? e.message : String(e),
     });
 
-    return next({ status: 500, message: 'Book search failed.' });
+    return next({ status: 500, message: 'Failed to read the book library.' });
   }
-};
+});
 
 bookRoutes.get('/search', bookSearchHandler);
 

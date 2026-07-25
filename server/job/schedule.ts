@@ -5,6 +5,7 @@ import bookLoreTracker from '@server/lib/bookloretracker';
 import downloadTracker from '@server/lib/downloadtracker';
 import ImageProxy from '@server/lib/imageproxy';
 import refreshToken from '@server/lib/refreshToken';
+import { bookLoreScanner } from '@server/lib/scanners/booklore';
 import {
   jellyfinFullScanner,
   jellyfinRecentScanner,
@@ -275,6 +276,24 @@ export const startJobs = (): void => {
       bookLoreTracker.run();
     }),
     running: () => bookLoreTracker.status().running,
+  });
+
+  // Mirror BookLore's library into Seerr, the same way the Plex and Jellyfin
+  // library scans do for their servers.
+  scheduledJobs.push({
+    id: 'booklore-library-scan',
+    name: 'BookLore Library Scan',
+    type: 'process',
+    interval: 'hours',
+    cronSchedule: jobs['booklore-library-scan'].schedule,
+    job: schedule.scheduleJob(jobs['booklore-library-scan'].schedule, () => {
+      logger.info('Starting scheduled job: BookLore Library Scan', {
+        label: 'Jobs',
+      });
+      bookLoreScanner.run();
+    }),
+    running: () => bookLoreScanner.status().running,
+    cancelFn: () => bookLoreScanner.cancel(),
   });
 
   logger.info('Scheduled jobs loaded', { label: 'Jobs' });

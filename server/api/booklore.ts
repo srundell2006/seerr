@@ -99,6 +99,26 @@ export interface ProwlarrRelease {
   score?: number | null;
 }
 
+/**
+ * A book in BookLore's own library, from GET /api/v1/books. Only the fields
+ * the library sync needs are transcribed; the real DTO is much larger
+ * (reading progress, shelves, per-format files) and none of it is our concern.
+ */
+export interface BookLoreBook {
+  id: number;
+  title?: string | null;
+  addedOn?: string | null;
+  metadata?: {
+    title?: string | null;
+    authors?: string[] | null;
+    isbn13?: string | null;
+    isbn10?: string | null;
+    asin?: string | null;
+    thumbnailUrl?: string | null;
+    publisher?: string | null;
+  } | null;
+}
+
 export interface AddWantedBookOptions {
   title: string;
   author?: string;
@@ -111,6 +131,20 @@ interface TokenPair {
   accessToken: string;
   refreshToken: string;
 }
+
+/**
+ * BookLore's lookup fans out across twelve metadata providers (including
+ * Audible and an Ollama model) and measured ~46s against a real instance, so
+ * it cannot share Seerr's global apiRequestTimeout — that defaults to 10s and
+ * aborted every single search.
+ */
+const LOOKUP_TIMEOUT = 180000;
+
+/**
+ * Everything other than lookup is a plain database read on BookLore's side and
+ * returns fast; this only needs to be generous enough for a large library.
+ */
+const DEFAULT_TIMEOUT = 60000;
 
 /** Endpoints that must never carry (or trigger a refresh of) a bearer token. */
 const AUTH_PATHS = ['/api/v1/auth/login', '/api/v1/auth/refresh'];
@@ -155,7 +189,7 @@ class BookLoreAPI extends ExternalAPI {
         // Deliberately no nodeCache: a cached wanted-list would defeat the
         // whole point of the poller, and caching would require an
         // AvailableCacheIds entry we don't otherwise need.
-        timeout: getSettings().network.apiRequestTimeout,
+        timeout: DEFAULT_TIMEOUT,
       }
     );
 
@@ -274,6 +308,20 @@ class BookLoreAPI extends ExternalAPI {
     }
   }
 
+  /**
+   * BookLore's library in one shot — the endpoint takes no paging parameters,
+   * so this is deliberately a full read. Descriptions are left out: they
+   * multiply the payload size and the sync has no use for them.
+   */
+  public async getBooks(): Promise<BookLoreBook[]> {
+    await this.ensureAuthenticated();
+    return this.get<BookLoreBook[]>(
+      '/api/v1/books',
+      { params: { withDescription: false } },
+      0
+    );
+  }
+
   public async getWantedBooks(): Promise<WantedBook[]> {
     await this.ensureAuthenticated();
     return this.get<WantedBook[]>('/api/v1/wanted-books', undefined, 0);
@@ -290,7 +338,7 @@ class BookLoreAPI extends ExternalAPI {
     await this.ensureAuthenticated();
     return this.get<BookLookupResult[]>(
       '/api/v1/wanted-books/lookup',
-      { params: { query } },
+      { params: { query }, timeout: LOOKUP_TIMEOUT },
       0
     );
   }

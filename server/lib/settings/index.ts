@@ -214,6 +214,8 @@ interface PublicSettings {
 
 interface FullPublicSettings extends PublicSettings {
   applicationTitle: string;
+  /** Lets the UI hide the Books nav entry when BookLore is not set up. */
+  bookloreEnabled: boolean;
   applicationUrl: string;
   hideAvailable: boolean;
   hideBlocklisted: boolean;
@@ -392,7 +394,8 @@ export type JobId =
   | 'image-cache-cleanup'
   | 'availability-sync'
   | 'process-blocklisted-tags'
-  | 'booklore-sync';
+  | 'booklore-sync'
+  | 'booklore-library-scan';
 
 export interface AllSettings {
   clientId: string;
@@ -647,6 +650,9 @@ class Settings {
         'booklore-sync': {
           schedule: '0 */2 * * * *',
         },
+        'booklore-library-scan': {
+          schedule: '0 15 4 * * *',
+        },
       },
       network: {
         csrfProtection: false,
@@ -776,6 +782,7 @@ class Settings {
       newPlexLogin: this.data.main.newPlexLogin,
       youtubeUrl: this.data.main.youtubeUrl,
       plexClientIdentifier: this.data.clientId,
+      bookloreEnabled: this.data.booklore.enabled,
     };
   }
 
