@@ -146,6 +146,14 @@ const LOOKUP_TIMEOUT = 180000;
  */
 const DEFAULT_TIMEOUT = 60000;
 
+/**
+ * The library read is one unpaged request for the entire catalogue —
+ * BookLore's /books takes no paging parameters. Measured against a real
+ * instance: 140,482 books, 139 MB, 101 seconds. The bound is deliberately
+ * several times that so a slower disk or a bigger library still completes.
+ */
+const LIBRARY_TIMEOUT = 600000;
+
 /** Endpoints that must never carry (or trigger a refresh of) a bearer token. */
 const AUTH_PATHS = ['/api/v1/auth/login', '/api/v1/auth/refresh'];
 
@@ -317,7 +325,7 @@ class BookLoreAPI extends ExternalAPI {
     await this.ensureAuthenticated();
     return this.get<BookLoreBook[]>(
       '/api/v1/books',
-      { params: { withDescription: false } },
+      { params: { withDescription: false }, timeout: LIBRARY_TIMEOUT },
       0
     );
   }
