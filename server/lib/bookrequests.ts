@@ -20,13 +20,30 @@ import { Permission } from '@server/lib/permissions';
 import logger from '@server/logger';
 import { z } from 'zod';
 
+/**
+ * Metadata providers routinely return null for identifiers they don't carry —
+ * every non-Audible result has a null ASIN, and plenty have no ISBN — and the
+ * client forwards the record as it received it. `.optional()` alone rejects
+ * null, so these are nullish and normalised to undefined. Empty strings are
+ * treated the same way, since an absent identifier and a blank one mean the
+ * same thing to the matching logic.
+ */
+const optionalText = z
+  .string()
+  .trim()
+  .nullish()
+  .transform((value) => value || undefined);
+
 export const bookRequestSchema = z.object({
   mediaType: z.literal(MediaType.BOOK),
   title: z.string().trim().min(1),
-  author: z.string().trim().optional(),
-  isbn13: z.string().trim().optional(),
-  asin: z.string().trim().optional(),
-  preferredFormat: z.enum(['EBOOK', 'AUDIOBOOK', 'ANY']).optional(),
+  author: optionalText,
+  isbn13: optionalText,
+  asin: optionalText,
+  preferredFormat: z
+    .enum(['EBOOK', 'AUDIOBOOK', 'ANY'])
+    .nullish()
+    .transform((value) => value ?? undefined),
 });
 
 export type BookRequestBody = z.infer<typeof bookRequestSchema>;
@@ -70,6 +87,13 @@ export const createBookRequest = async (
   const existing = await findExistingBookMedia(body);
 
   if (existing) {
+    // Already on the shelf, per the synced library.
+    if (existing.status === MediaStatus.AVAILABLE) {
+      throw new DuplicateMediaRequestError(
+        'This book is already available in your library.'
+      );
+    }
+
     const activeRequest = (existing.requests ?? []).find(
       (request) =>
         request.status !== MediaRequestStatus.DECLINED &&
@@ -92,28 +116,11 @@ export const createBookRequest = async (
       status: MediaStatus.PENDING,
     });
 
-  // A book already sitting in BookLore's library needs no request at all.
-  const lookupMatch = await booklore
-    .lookup(body.title)
-    .then((results) =>
-      results.find(
-        (result) =>
-          (body.asin && result.asin === body.asin) ||
-          (body.isbn13 && result.isbn13 === body.isbn13)
-      )
-    )
-    .catch(() => undefined);
-
-  if (lookupMatch?.inLibrary) {
-    media.status = MediaStatus.AVAILABLE;
-    media.bookloreBookId = lookupMatch.existingBookId ?? undefined;
-    await mediaRepository.save(media);
-
-    throw new DuplicateMediaRequestError(
-      'This book is already available in your library.'
-    );
-  }
-
+  // Deliberately NO booklore.lookup() here. It used to run one on every
+  // request to check inLibrary, which cost the full ~46s provider fan-out and
+  // made the POST take 42 seconds — long enough that the browser gave up and
+  // showed an error for a request that had actually succeeded. The synced
+  // library answers the same question locally, above, in microseconds.
   await mediaRepository.save(media);
 
   const autoApprove = user.hasPermission(
@@ -166,6 +173,22 @@ const findExistingBookMedia = async (
     });
     if (byIsbn) {
       return byIsbn;
+    }
+  }
+
+  // Last resort. Only used when both title and author are known, because a
+  // title alone matches far too broadly across a six-figure library.
+  if (body.author) {
+    const byTitleAuthor = await mediaRepository.findOne({
+      where: {
+        mediaType: MediaType.BOOK,
+        bookTitle: body.title,
+        bookAuthor: body.author,
+      },
+      relations: { requests: true },
+    });
+    if (byTitleAuthor) {
+      return byTitleAuthor;
     }
   }
 

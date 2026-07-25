@@ -6721,16 +6721,25 @@ paths:
                   description: Book requests only. The book title.
                 author:
                   type: string
+                  nullable: true
                   description: Book requests only.
                 isbn13:
                   type: string
-                  description: Book requests only.
+                  nullable: true
+                  description: |
+                    Book requests only. Nullable because metadata providers
+                    routinely return no ISBN for a result, and the client
+                    forwards the record as-is.
                 asin:
                   type: string
-                  description: Book requests only. Identifies an audiobook edition.
+                  nullable: true
+                  description: |
+                    Book requests only. Identifies an audiobook edition.
+                    Null for every non-Audible provider result.
                 preferredFormat:
                   type: string
                   enum: [EBOOK, AUDIOBOOK, ANY]
+                  nullable: true
                   description: Book requests only.
                 tvdbId:
                   type: number
