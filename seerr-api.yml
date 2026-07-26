@@ -6535,6 +6535,35 @@ paths:
                           type: string
                         title:
                           type: string
+  /book/cover/{bookloreBookId}:
+    get:
+      summary: Get a book cover
+      description: |
+        Proxies a cover image out of BookLore. BookLore guards its media
+        endpoints with a short-lived JWT passed as a query parameter, which a
+        browser img tag cannot refresh, so Seerr fetches and forwards it.
+      tags:
+        - search
+      parameters:
+        - in: path
+          name: bookloreBookId
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: size
+          schema:
+            type: string
+            enum: [thumbnail, cover]
+            default: thumbnail
+      responses:
+        '200':
+          description: Cover image returned
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
   /book/library:
     get:
       summary: Get the synced BookLore library

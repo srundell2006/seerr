@@ -1,5 +1,4 @@
-import { BookThumbnail } from '@app/components/BookSearch';
-import Badge from '@app/components/Common/Badge';
+import BookCard from '@app/components/BookSearch/BookCard';
 import Button from '@app/components/Common/Button';
 import LoadingSpinner from '@app/components/Common/LoadingSpinner';
 import useDebouncedState from '@app/hooks/useDebouncedState';
@@ -11,7 +10,7 @@ import {
   ChevronRightIcon,
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/solid';
-import { MediaStatus } from '@server/constants/media';
+import type { MediaStatus } from '@server/constants/media';
 import { useRouter } from 'next/router';
 import type { ChangeEvent } from 'react';
 import { useState } from 'react';
@@ -25,7 +24,6 @@ const messages = defineMessages('components.BookSearch.LibraryList', {
     'The BookLore library scan runs periodically and will populate this list once it has completed.',
   librarynoresults: 'No books in the library match your search.',
   libraryError: 'The BookLore library could not be loaded.',
-  unknownAuthor: 'Unknown Author',
 });
 
 export interface BookLibraryItem {
@@ -36,6 +34,8 @@ export interface BookLibraryItem {
   isbn13?: string | null;
   asin?: string | null;
   thumbnailUrl?: string | null;
+  /** Ready-to-render cover URL, e.g. "/api/v1/book/cover/171987". */
+  coverUrl?: string | null;
   status: number;
 }
 
@@ -82,32 +82,6 @@ const LibraryList = () => {
     }
 
     setSearchFilter(e.target.value);
-  };
-
-  const statusBadge = (status: number) => {
-    switch (status) {
-      case MediaStatus.AVAILABLE:
-      case MediaStatus.PARTIALLY_AVAILABLE:
-        return (
-          <Badge badgeType="success">
-            {intl.formatMessage(globalMessages.available)}
-          </Badge>
-        );
-      case MediaStatus.PROCESSING:
-        return (
-          <Badge badgeType="primary">
-            {intl.formatMessage(globalMessages.processing)}
-          </Badge>
-        );
-      case MediaStatus.PENDING:
-        return (
-          <Badge badgeType="warning">
-            {intl.formatMessage(globalMessages.pending)}
-          </Badge>
-        );
-      default:
-        return null;
-    }
   };
 
   if (!data && error) {
@@ -157,29 +131,17 @@ const LibraryList = () => {
           )}
         </div>
       ) : (
-        <ul className="space-y-4">
+        <ul className="cards-vertical">
           {data.results.map((book) => (
-            <li
-              key={`book-library-${book.id}`}
-              className="flex w-full items-start space-x-4 rounded-xl bg-gray-800 p-4 text-gray-400 shadow-md ring-1 ring-gray-700"
-            >
-              <BookThumbnail thumbnailUrl={book.thumbnailUrl} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-lg font-bold text-white">
-                  {book.title || intl.formatMessage(globalMessages.book)}
-                </div>
-                <div className="truncate text-sm text-gray-300">
-                  {book.author || intl.formatMessage(messages.unknownAuthor)}
-                </div>
-                {(book.isbn13 || book.asin) && (
-                  <div className="truncate text-sm text-gray-400">
-                    {[book.isbn13, book.asin].filter(Boolean).join(' • ')}
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-shrink-0 items-center">
-                {statusBadge(book.status)}
-              </div>
+            <li key={`book-library-${book.id}`}>
+              <BookCard
+                title={book.title || intl.formatMessage(globalMessages.book)}
+                author={book.author}
+                coverUrl={book.coverUrl ?? book.thumbnailUrl}
+                status={book.status as MediaStatus}
+                inLibrary
+                canExpand
+              />
             </li>
           ))}
         </ul>

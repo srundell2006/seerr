@@ -18,6 +18,8 @@ const bookRoutes = Router();
 export interface BookSearchResult extends Omit<BookLookupResult, 'provider'> {
   /** 'Library' marks a result answered from Seerr's own synced rows. */
   provider: MetadataProvider | 'Library';
+  /** Ready-to-render cover: the Seerr proxy, or the provider's thumbnail. */
+  coverUrl?: string | null;
   mediaInfo?: { id: number; status: number } | null;
 }
 
@@ -67,6 +69,9 @@ const findInSyncedLibrary = async (
     inLibrary: true,
     existingBookId: media.bookloreBookId ?? null,
     alreadyWanted: false,
+    coverUrl: media.bookloreBookId
+      ? `/api/v1/book/cover/${media.bookloreBookId}`
+      : null,
     mediaInfo: { id: media.id, status: media.status },
   };
 };
@@ -140,6 +145,79 @@ export const bookSearchHandler: RequestHandler = async (req, res, next) => {
 };
 
 /**
+ * Sniffs the image type from magic bytes.
+ *
+ * BookLore serves cover bytes with Content-Type application/json, so its own
+ * header cannot be forwarded — a browser would refuse to render it.
+ */
+const detectImageType = (buffer: Buffer): string => {
+  if (buffer.length >= 3 && buffer.toString('hex', 0, 3) === 'ffd8ff') {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 4 && buffer.toString('hex', 0, 4) === '89504e47') {
+    return 'image/png';
+  }
+  if (buffer.length >= 12 && buffer.toString('ascii', 8, 12) === 'WEBP') {
+    return 'image/webp';
+  }
+  if (buffer.length >= 4 && buffer.toString('ascii', 0, 4) === 'GIF8') {
+    return 'image/gif';
+  }
+  return 'application/octet-stream';
+};
+
+/**
+ * Proxies a book cover out of BookLore.
+ *
+ * The browser cannot fetch these directly: BookLore wants a short-lived JWT in
+ * a `token` query parameter, which a plain <img> tag has no way to keep fresh.
+ * Seerr holds the service-account session already, so it fetches and forwards.
+ */
+bookRoutes.get('/cover/:bookloreBookId', async (req, res, next) => {
+  const booklore = getBookLoreClient();
+
+  if (!booklore) {
+    return next({
+      status: 503,
+      message: 'BookLore is not configured.',
+      code: 'BOOKLORE_NOT_CONFIGURED',
+    });
+  }
+
+  const bookloreBookId = Number(req.params.bookloreBookId);
+
+  if (!Number.isInteger(bookloreBookId) || bookloreBookId <= 0) {
+    return next({ status: 400, message: 'Invalid book id.' });
+  }
+
+  const size = req.query.size === 'cover' ? 'cover' : 'thumbnail';
+
+  try {
+    const image = await booklore.fetchCover(bookloreBookId, size);
+
+    res.setHeader('Content-Type', detectImageType(image));
+    // Covers only change when the book's metadata is edited, so let the
+    // browser keep them rather than re-proxying on every grid render.
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.status(200).send(image);
+  } catch (e) {
+    const status = (e as { response?: { status?: number } }).response?.status;
+
+    if (status === 404) {
+      return next({ status: 404, message: 'Cover not found.' });
+    }
+
+    logger.debug('Failed to proxy book cover', {
+      label: 'Books',
+      bookloreBookId,
+      errorMessage: e instanceof Error ? e.message : String(e),
+    });
+
+    return next({ status: 500, message: 'Failed to load cover.' });
+  }
+});
+
+/**
  * Seerr's own synced copy of BookLore's library, populated by the BookLore
  * Library Scan job. Read from the local table rather than BookLore so the UI
  * is not paying ~46s per lookup just to answer "what do we already have".
@@ -183,6 +261,12 @@ bookRoutes.get('/library', async (req, res, next) => {
         isbn13: media.isbn13,
         asin: media.asin,
         thumbnailUrl: media.bookThumbnailUrl,
+        // Always the proxy: BookLore's /books payload carries no thumbnail
+        // URL at all, so the cover endpoint is the only source for a synced
+        // book's artwork.
+        coverUrl: media.bookloreBookId
+          ? `/api/v1/book/cover/${media.bookloreBookId}`
+          : null,
         status: media.status,
       })),
     });
@@ -247,6 +331,12 @@ const decorateWithMediaInfo = async (
 
     return {
       ...result,
+      // Provider results carry their own thumbnail; anything already in
+      // BookLore gets the proxied cover, which is both authoritative and
+      // not dependent on an external host staying up.
+      coverUrl: result.existingBookId
+        ? `/api/v1/book/cover/${result.existingBookId}`
+        : (result.thumbnailUrl ?? null),
       mediaInfo: match ? { id: match.id, status: match.status } : null,
     };
   });

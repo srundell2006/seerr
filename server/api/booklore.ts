@@ -330,6 +330,29 @@ class BookLoreAPI extends ExternalAPI {
     );
   }
 
+  /**
+   * Fetches a book's cover image bytes.
+   *
+   * BookLore guards /api/v1/media/** with a filter that reads the JWT from a
+   * `token` query parameter and rejects the request before normal bearer auth
+   * is considered — an Authorization header alone returns 401. Its tokens are
+   * also short-lived, which is why Seerr proxies these rather than pointing
+   * the browser straight at BookLore.
+   */
+  public async fetchCover(
+    bookloreBookId: number,
+    size: 'thumbnail' | 'cover' = 'thumbnail'
+  ): Promise<Buffer> {
+    await this.ensureAuthenticated();
+
+    const response = await this.axios.get<ArrayBuffer>(
+      `/api/v1/media/book/${bookloreBookId}/${size}`,
+      { params: { token: this.accessToken }, responseType: 'arraybuffer' }
+    );
+
+    return Buffer.from(response.data);
+  }
+
   public async getWantedBooks(): Promise<WantedBook[]> {
     await this.ensureAuthenticated();
     return this.get<WantedBook[]>('/api/v1/wanted-books', undefined, 0);

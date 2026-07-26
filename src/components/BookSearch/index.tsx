@@ -1,9 +1,8 @@
-import Badge from '@app/components/Common/Badge';
+import BookCard from '@app/components/BookSearch/BookCard';
 import Button from '@app/components/Common/Button';
 import { SmallLoadingSpinner } from '@app/components/Common/LoadingSpinner';
 import Modal from '@app/components/Common/Modal';
 import useToasts from '@app/hooks/useToasts';
-import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import {
@@ -13,7 +12,7 @@ import {
   ExclamationTriangleIcon,
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/solid';
-import { MediaStatus } from '@server/constants/media';
+import type { MediaStatus } from '@server/constants/media';
 import axios from 'axios';
 import Link from 'next/link';
 import type { FormEvent } from 'react';
@@ -62,6 +61,11 @@ export interface BookSearchResult {
   isbn10?: string | null;
   asin?: string | null;
   thumbnailUrl?: string | null;
+  /**
+   * Ready-to-render cover URL: the Seerr proxy when the book is already in
+   * BookLore, otherwise the metadata provider's thumbnail.
+   */
+  coverUrl?: string | null;
   provider: string;
   inLibrary: boolean;
   existingBookId?: number | null;
@@ -108,36 +112,9 @@ const getResultKey = (book: BookSearchResult): string =>
   book.isbn10 ??
   `${book.provider}-${book.title}-${book.authors.join(',')}`;
 
-export const BookThumbnail = ({
-  thumbnailUrl,
-}: {
-  thumbnailUrl?: string | null;
-}) => {
-  const [hasError, setHasError] = useState(false);
-
-  if (!thumbnailUrl || hasError) {
-    return (
-      <div className="flex h-28 w-20 flex-shrink-0 items-center justify-center rounded-md bg-gray-700 text-gray-500 ring-1 ring-gray-600">
-        <BookOpenIcon className="h-8 w-8" />
-      </div>
-    );
-  }
-
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={thumbnailUrl}
-      alt=""
-      className="h-28 w-20 flex-shrink-0 rounded-md object-cover ring-1 ring-gray-600"
-      onError={() => setHasError(true)}
-    />
-  );
-};
-
 const BookSearch = () => {
   const intl = useIntl();
   const { addToast } = useToasts();
-  const { hasPermission } = useUser();
 
   const [searchValue, setSearchValue] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
@@ -169,7 +146,6 @@ const BookSearch = () => {
     }
   );
 
-  const canRequest = hasPermission(Permission.REQUEST_BOOK);
   const errorBody = error ? getErrorBody(error) : undefined;
   const errorCode = errorBody?.code;
   const isNotConfigured = !!error && errorCode === 'BOOKLORE_NOT_CONFIGURED';
@@ -256,53 +232,6 @@ const BookSearch = () => {
     }
   };
 
-  const renderStatus = (book: BookSearchResult) => {
-    const status = book.mediaInfo?.status;
-
-    if (
-      book.inLibrary ||
-      status === MediaStatus.AVAILABLE ||
-      status === MediaStatus.PARTIALLY_AVAILABLE
-    ) {
-      return (
-        <Badge badgeType="success">
-          {intl.formatMessage(globalMessages.available)}
-        </Badge>
-      );
-    }
-
-    if (
-      book.alreadyWanted ||
-      requestedKeys.includes(getResultKey(book)) ||
-      status === MediaStatus.PENDING ||
-      status === MediaStatus.PROCESSING
-    ) {
-      return (
-        <Badge badgeType="primary">
-          {intl.formatMessage(globalMessages.requested)}
-        </Badge>
-      );
-    }
-
-    if (!canRequest) {
-      return null;
-    }
-
-    return (
-      <Button
-        buttonType="primary"
-        buttonSize="sm"
-        onClick={() => {
-          setPreferredFormat('ANY');
-          setSelectedBook(book);
-        }}
-      >
-        <BookOpenIcon />
-        <span>{intl.formatMessage(globalMessages.request)}</span>
-      </Button>
-    );
-  };
-
   const renderResults = () => {
     if (!submittedQuery && !data) {
       return (
@@ -326,41 +255,36 @@ const BookSearch = () => {
 
     return (
       <ul
-        className={`space-y-4 transition-opacity duration-300 ${
+        className={`cards-vertical transition-opacity duration-300 ${
           isValidating ? 'opacity-50' : ''
         }`}
       >
-        {data.results.map((book) => (
-          <li
-            key={getResultKey(book)}
-            className="flex w-full items-start space-x-4 rounded-xl bg-gray-800 p-4 text-gray-400 shadow-md ring-1 ring-gray-700"
-          >
-            <BookThumbnail thumbnailUrl={book.thumbnailUrl} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-lg font-bold text-white">
-                {book.title}
-              </div>
-              <div className="truncate text-sm text-gray-300">
-                {book.authors.length
-                  ? book.authors.join(', ')
-                  : intl.formatMessage(messages.unknownAuthor)}
-              </div>
-              {(book.publisher || book.publishedYear) && (
-                <div className="truncate text-sm text-gray-400">
-                  {[book.publisher, book.publishedYear]
-                    .filter(Boolean)
-                    .join(' • ')}
-                </div>
-              )}
-              <div className="mt-2">
-                <Badge badgeType="light">{book.provider}</Badge>
-              </div>
-            </div>
-            <div className="flex flex-shrink-0 items-center">
-              {renderStatus(book)}
-            </div>
-          </li>
-        ))}
+        {data.results.map((book) => {
+          const key = getResultKey(book);
+
+          return (
+            <li key={key}>
+              <BookCard
+                title={book.title}
+                author={
+                  book.authors.length
+                    ? book.authors.join(', ')
+                    : intl.formatMessage(messages.unknownAuthor)
+                }
+                coverUrl={book.coverUrl ?? book.thumbnailUrl}
+                year={book.publishedYear}
+                status={book.mediaInfo?.status as MediaStatus | undefined}
+                inLibrary={book.inLibrary}
+                isRequested={book.alreadyWanted || requestedKeys.includes(key)}
+                onRequest={() => {
+                  setPreferredFormat('ANY');
+                  setSelectedBook(book);
+                }}
+                canExpand
+              />
+            </li>
+          );
+        })}
       </ul>
     );
   };
