@@ -9,6 +9,7 @@ import { Transition } from '@headlessui/react';
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { BookOpenIcon } from '@heroicons/react/24/solid';
 import { MediaStatus } from '@server/constants/media';
+import Link from 'next/link';
 import { Fragment, useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 
@@ -19,6 +20,11 @@ const messages = defineMessages('components.BookSearch.BookCard', {
 interface BookCardProps {
   title: string;
   author?: string | null;
+  /**
+   * BookLore's id for the book, which makes the card navigable. Derived from
+   * `coverUrl` when omitted.
+   */
+  bookloreBookId?: number | null;
   /**
    * Ready-to-render cover URL. Same-origin for anything BookLore already has
    * ("/api/v1/book/cover/123"), otherwise the metadata provider's thumbnail.
@@ -38,6 +44,7 @@ interface BookCardProps {
 const BookCard = ({
   title,
   author,
+  bookloreBookId,
   coverUrl,
   year,
   status,
@@ -79,6 +86,47 @@ const BookCard = ({
 
   const showCover = !!coverUrl && !hasCoverError;
   const authorLabel = author || intl.formatMessage(messages.unknownAuthor);
+  const detailId = bookloreBookId ?? null;
+
+  // Only the overlay is the link, exactly as TitleCard does it: on touch the
+  // first tap reveals the overlay and the second one navigates.
+  const detailContent = (
+    <div className="flex h-full w-full items-end">
+      <div
+        className={`px-2 text-white ${showRequestButton ? 'pb-11' : 'pb-2'}`}
+      >
+        {year && <div className="text-sm font-medium">{year}</div>}
+        <h2
+          className="whitespace-normal text-xl font-bold leading-tight"
+          style={{
+            WebkitLineClamp: 3,
+            display: '-webkit-box',
+            overflow: 'hidden',
+            WebkitBoxOrient: 'vertical',
+            wordBreak: 'break-word',
+          }}
+          data-testid="book-card-title"
+        >
+          {title}
+        </h2>
+        <div
+          className="whitespace-normal text-xs"
+          style={{
+            WebkitLineClamp: showRequestButton ? 3 : 5,
+            display: '-webkit-box',
+            overflow: 'hidden',
+            WebkitBoxOrient: 'vertical',
+            wordBreak: 'break-word',
+          }}
+        >
+          {authorLabel}
+        </div>
+      </div>
+    </div>
+  );
+
+  const detailBackground =
+    'linear-gradient(180deg, rgba(45, 55, 72, 0.4) 0%, rgba(45, 55, 72, 0.9) 100%)';
 
   return (
     <div
@@ -106,7 +154,7 @@ const BookCard = ({
             setShowDetail(true);
           }
         }}
-        role="button"
+        role={detailId ? 'link' : 'button'}
         tabIndex={0}
       >
         <div className="absolute inset-0 h-full w-full overflow-hidden">
@@ -179,50 +227,25 @@ const BookCard = ({
             leaveTo="opacity-0"
           >
             <div className="absolute inset-0 overflow-hidden rounded-xl">
-              <div
-                className="absolute inset-0 h-full w-full overflow-hidden text-left"
-                style={{
-                  background:
-                    'linear-gradient(180deg, rgba(45, 55, 72, 0.4) 0%, rgba(45, 55, 72, 0.9) 100%)',
-                }}
-              >
-                <div className="flex h-full w-full items-end">
-                  <div
-                    className={`px-2 text-white ${
-                      showRequestButton ? 'pb-11' : 'pb-2'
-                    }`}
-                  >
-                    {year && <div className="text-sm font-medium">{year}</div>}
-                    <h2
-                      className="whitespace-normal text-xl font-bold leading-tight"
-                      style={{
-                        WebkitLineClamp: 3,
-                        display: '-webkit-box',
-                        overflow: 'hidden',
-                        WebkitBoxOrient: 'vertical',
-                        wordBreak: 'break-word',
-                      }}
-                      data-testid="book-card-title"
-                    >
-                      {title}
-                    </h2>
-                    <div
-                      className="whitespace-normal text-xs"
-                      style={{
-                        WebkitLineClamp: showRequestButton ? 3 : 5,
-                        display: '-webkit-box',
-                        overflow: 'hidden',
-                        WebkitBoxOrient: 'vertical',
-                        wordBreak: 'break-word',
-                      }}
-                    >
-                      {authorLabel}
-                    </div>
-                  </div>
+              {detailId ? (
+                <Link
+                  href={`/book/${detailId}`}
+                  className="absolute inset-0 h-full w-full cursor-pointer overflow-hidden text-left"
+                  style={{ background: detailBackground }}
+                >
+                  {detailContent}
+                </Link>
+              ) : (
+                <div
+                  className="absolute inset-0 h-full w-full overflow-hidden text-left"
+                  style={{ background: detailBackground }}
+                >
+                  {detailContent}
                 </div>
-              </div>
+              )}
 
-              <div className="absolute bottom-0 left-0 right-0 flex justify-between px-2 py-2">
+              {/* Sits above the link so requesting never navigates. */}
+              <div className="absolute bottom-0 left-0 right-0 z-40 flex justify-between px-2 py-2">
                 {showRequestButton && (
                   <Button
                     buttonType="primary"

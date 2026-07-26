@@ -6535,6 +6535,27 @@ paths:
                           type: string
                         title:
                           type: string
+  /book/{bookloreBookId}:
+    get:
+      summary: Get book details
+      description: |
+        Full detail for one book: BookLore's metadata merged with Seerr's own
+        media row and requests.
+      tags:
+        - search
+      parameters:
+        - in: path
+          name: bookloreBookId
+          required: true
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Book details returned
+          content:
+            application/json:
+              schema:
+                type: object
   /book/cover/{bookloreBookId}:
     get:
       summary: Get a book cover

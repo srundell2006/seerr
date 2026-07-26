@@ -8,6 +8,7 @@ import { MediaStatus, MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import bookLoreTracker from '@server/lib/bookloretracker';
+import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import type { RequestHandler } from 'express';
 import { Router } from 'express';
@@ -141,6 +142,122 @@ export const bookSearchHandler: RequestHandler = async (req, res, next) => {
             code: 'BOOKLORE_SEARCH_FAILED',
           }
     );
+  }
+};
+
+/**
+ * Full detail for one book, the book equivalent of /movie/{id}.
+ *
+ * Merges BookLore's metadata (the only source for description, publisher,
+ * categories and so on) with Seerr's own Media row and requests, so the page
+ * can show both what the book is and where the request stands.
+ */
+const bookDetailHandler: RequestHandler = async (req, res, next) => {
+  const bookloreBookId = Number(req.params.bookloreBookId);
+
+  // Registered last with a bare param, so /search, /wanted, /library and
+  // /cover still match first. Express 5 dropped inline regex in paths, so the
+  // numeric check lives here instead of in the route pattern.
+  if (!Number.isInteger(bookloreBookId) || bookloreBookId <= 0) {
+    return next({ status: 404, message: 'Book not found.' });
+  }
+
+  const booklore = getBookLoreClient();
+
+  if (!booklore) {
+    return next({
+      status: 503,
+      message: 'BookLore is not configured.',
+      code: 'BOOKLORE_NOT_CONFIGURED',
+    });
+  }
+
+  try {
+    const [book, media] = await Promise.all([
+      booklore.getBook(bookloreBookId),
+      getRepository(Media).findOne({
+        where: { bookloreBookId, mediaType: MediaType.BOOK },
+        relations: { requests: { requestedBy: true } },
+      }),
+    ]);
+
+    const metadata = book.metadata ?? {};
+    const settings = getSettings().booklore;
+    // Prefer the externally reachable address; the internal one is not
+    // resolvable from a browser.
+    const externalBase = (
+      settings.externalUrl ||
+      `${settings.useSsl ? 'https' : 'http'}://${settings.hostname}:${
+        settings.port
+      }${settings.baseUrl ?? ''}`
+    ).replace(/\/$/, '');
+
+    return res.status(200).json({
+      bookloreBookId,
+      id: media?.id ?? null,
+      title: metadata.title ?? book.title ?? null,
+      subtitle: metadata.subtitle ?? null,
+      authors: metadata.authors ?? [],
+      description: metadata.description ?? null,
+      publisher: metadata.publisher ?? null,
+      publishedDate: metadata.publishedDate ?? null,
+      publishedYear: metadata.publishedDate
+        ? Number(metadata.publishedDate.slice(0, 4))
+        : null,
+      pageCount: metadata.pageCount ?? null,
+      language: metadata.language ?? null,
+      seriesName: metadata.seriesName ?? null,
+      seriesNumber: metadata.seriesNumber ?? null,
+      seriesTotal: metadata.seriesTotal ?? null,
+      categories: metadata.categories ?? [],
+      isbn13: metadata.isbn13 ?? null,
+      isbn10: metadata.isbn10 ?? null,
+      asin: metadata.asin ?? null,
+      ratings: {
+        amazon: metadata.amazonRating ?? null,
+        goodreads: metadata.goodreadsRating ?? null,
+        hardcover: metadata.hardcoverRating ?? null,
+      },
+      file: book.primaryFile
+        ? {
+            fileName: book.primaryFile.fileName ?? null,
+            fileSizeKb: book.primaryFile.fileSizeKb ?? null,
+            bookType: book.primaryFile.bookType ?? null,
+          }
+        : null,
+      libraryName: book.libraryName ?? null,
+      isComic: book.isComic ?? false,
+      addedOn: book.addedOn ?? null,
+      coverUrl: `/api/v1/book/cover/${bookloreBookId}?size=cover`,
+      externalUrl: `${externalBase}/book/${bookloreBookId}`,
+      mediaInfo: media ? { id: media.id, status: media.status } : null,
+      requests: (media?.requests ?? []).map((request) => ({
+        id: request.id,
+        status: request.status,
+        createdAt: request.createdAt,
+        bookFormat: request.bookFormat ?? null,
+        requestedBy: request.requestedBy
+          ? {
+              id: request.requestedBy.id,
+              displayName: request.requestedBy.displayName,
+            }
+          : null,
+      })),
+    });
+  } catch (e) {
+    const status = (e as { response?: { status?: number } }).response?.status;
+
+    if (status === 404) {
+      return next({ status: 404, message: 'Book not found.' });
+    }
+
+    logger.error('Failed to load book detail', {
+      label: 'Books',
+      bookloreBookId,
+      errorMessage: e instanceof Error ? e.message : String(e),
+    });
+
+    return next({ status: 500, message: 'Failed to load book.' });
   }
 };
 
@@ -341,5 +458,7 @@ const decorateWithMediaInfo = async (
     };
   });
 };
+
+bookRoutes.get('/:bookloreBookId', bookDetailHandler);
 
 export default bookRoutes;

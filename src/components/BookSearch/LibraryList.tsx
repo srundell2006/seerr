@@ -137,6 +137,7 @@ const LibraryList = () => {
               <BookCard
                 title={book.title || intl.formatMessage(globalMessages.book)}
                 author={book.author}
+                bookloreBookId={book.bookloreBookId}
                 coverUrl={book.coverUrl ?? book.thumbnailUrl}
                 status={book.status as MediaStatus}
                 inLibrary

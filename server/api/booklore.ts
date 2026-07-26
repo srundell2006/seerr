@@ -119,6 +119,37 @@ export interface BookLoreBook {
   } | null;
 }
 
+/**
+ * A single book with its full metadata, from GET /api/v1/books/{id}.
+ *
+ * Everything except id is optional: BookLore omits null fields entirely, so a
+ * book with no description, series or ratings simply has no such key.
+ */
+export interface BookLoreBookDetail extends BookLoreBook {
+  libraryName?: string | null;
+  isComic?: boolean | null;
+  readStatus?: string | null;
+  primaryFile?: {
+    fileName?: string | null;
+    fileSizeKb?: number | null;
+    bookType?: string | null;
+  } | null;
+  metadata?: BookLoreBook['metadata'] & {
+    subtitle?: string | null;
+    description?: string | null;
+    publishedDate?: string | null;
+    pageCount?: number | null;
+    language?: string | null;
+    seriesName?: string | null;
+    seriesNumber?: number | null;
+    seriesTotal?: number | null;
+    categories?: string[] | null;
+    amazonRating?: number | null;
+    goodreadsRating?: number | null;
+    hardcoverRating?: number | null;
+  };
+}
+
 export interface AddWantedBookOptions {
   title: string;
   author?: string;
@@ -351,6 +382,16 @@ class BookLoreAPI extends ExternalAPI {
     );
 
     return Buffer.from(response.data);
+  }
+
+  /** One book with full metadata, for the detail page. */
+  public async getBook(bookloreBookId: number): Promise<BookLoreBookDetail> {
+    await this.ensureAuthenticated();
+    return this.get<BookLoreBookDetail>(
+      `/api/v1/books/${bookloreBookId}`,
+      { params: { withDescription: true } },
+      0
+    );
   }
 
   public async getWantedBooks(): Promise<WantedBook[]> {

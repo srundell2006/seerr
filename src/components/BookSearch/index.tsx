@@ -271,6 +271,7 @@ const BookSearch = () => {
                     ? book.authors.join(', ')
                     : intl.formatMessage(messages.unknownAuthor)
                 }
+                bookloreBookId={book.existingBookId}
                 coverUrl={book.coverUrl ?? book.thumbnailUrl}
                 year={book.publishedYear}
                 status={book.mediaInfo?.status as MediaStatus | undefined}
