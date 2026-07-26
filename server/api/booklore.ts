@@ -493,22 +493,51 @@ export const matchWantedBook = (
   );
 };
 
+let cachedClient: BookLoreAPI | null = null;
+let cachedConnectionKey = '';
+
 /**
- * Builds a client from the saved settings, or returns null when BookLore is
+ * Returns the shared client for the saved settings, or null when BookLore is
  * not configured. Keeps every caller from repeating the same guard.
+ *
+ * The instance is deliberately reused. Each client holds its own JWT, so
+ * building a fresh one per request meant a fresh login per request — and a
+ * poster grid asking for twenty covers at once fired twenty simultaneous
+ * logins, which BookLore answers with 400 for all but the first. Sharing one
+ * instance also lets the in-flight auth promise do its job: concurrent callers
+ * wait on a single login instead of stampeding /auth/login.
+ *
+ * The cache is keyed on the connection settings, so editing the host or
+ * credentials replaces the client rather than leaving a stale session behind.
  */
 export const getBookLoreClient = (): BookLoreAPI | null => {
   const settings = getSettings().booklore;
 
   if (!settings.enabled || !settings.hostname || !settings.username) {
+    cachedClient = null;
+    cachedConnectionKey = '';
     return null;
   }
 
-  return new BookLoreAPI({
-    url: BookLoreAPI.buildUrl(settings),
-    username: settings.username,
-    password: settings.password,
-  });
+  const connectionKey = [
+    settings.hostname,
+    settings.port,
+    settings.useSsl,
+    settings.baseUrl ?? '',
+    settings.username,
+    settings.password,
+  ].join('|');
+
+  if (!cachedClient || connectionKey !== cachedConnectionKey) {
+    cachedClient = new BookLoreAPI({
+      url: BookLoreAPI.buildUrl(settings),
+      username: settings.username,
+      password: settings.password,
+    });
+    cachedConnectionKey = connectionKey;
+  }
+
+  return cachedClient;
 };
 
 export default BookLoreAPI;
